@@ -10,6 +10,8 @@ Before any work, read these documents:
 - `Docs/CodingRules.md`: coding rules (structure, naming, zero allocation per frame, GPU code). Follow them for every change; `.editorconfig` enforces formatting and naming.
 
 ## Workflow
+- Before any work (a phase, an item, a fix or a refactor), present a detailed plan to the user and wait for approval. Ask questions or offer choices when something is ambiguous; do not decide alone.
+- Never commit: the user reviews and commits the changes. At the end of a task, report what changed and what still needs to be committed (for example new `.meta` files).
 - Work phase by phase, in order. Do not start a phase before the previous one meets its exit check. Phase 1 ends with a **stop and review** with the user before Phase 2.
 - An item is done only when its unit tests pass (Unity Test Framework, Edit Mode; GPU tests need a graphics device, so never use `-nographics`).
 - Keep the documents in sync **in the same change as the code**:
