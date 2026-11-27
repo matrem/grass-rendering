@@ -1,4 +1,4 @@
-# Copilot instructions - GrassRendering
+# Agent instructions - GrassRendering
 
 Unity 6.6 (6000.6.10f1) prototype of a GPU-driven procedural scatter system (grass, flowers, moss, small rocks, bushes) for URP Forward+, rendered with BatchRendererGroup indirect draws. Target PC GPUs: RTX 3060 Ti (test), RTX 5070 Ti (target).
 
