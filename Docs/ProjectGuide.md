@@ -6,7 +6,7 @@ This guide describes **what exists today** in the repository and how it works. I
 - The order of work and the progress are in the [implementation plan](GrassPrototype_Implementation.md).
 - The coding rules are in [CodingRules.md](CodingRules.md).
 
-Current state: **Phase 1 in progress** (spikes). On top of the Phase 0 skeleton (debug tools, quality tiers, bootstrap scene, tests, build script), the BRG draw spike draws millions of blades and small rocks with three draw command types (section 4.3). The spike code is replaced in Phase 2.
+Current state: **Phase 1 done** (spikes); next: Phase 1b (cost investigation). On top of the Phase 0 skeleton (debug tools, quality tiers, bootstrap scene, tests, build script), the BRG draw spike draws millions of blades and small rocks with three draw command types (section 4.3). The spike code is replaced in Phase 2.
 
 ---
 

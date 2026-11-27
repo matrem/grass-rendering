@@ -8,7 +8,8 @@ Phases are ordered so the riskiest parts are proven first. Each phase ends with 
 | Phase | Status |
 |---|---|
 | 0 - Project setup | Done |
-| 1 - Spikes | In progress |
+| 1 - Spikes | Done |
+| 1b - Cost investigation | Not started |
 | 2 - Core pipeline on a flat ground | Not started |
 | 3 - Layers | Not started |
 | 4 - Terrain adapter and streaming | Not started |
@@ -136,6 +137,7 @@ Spike content: 1M blades on a flat grid, per-blade data (position, yaw) in a cus
 
   BRG is confirmed as the main path: 0.1 to 0.3 ms faster than the Graphics.Render*Indirect baseline, same CPU cost (submission under 0.02 ms). Applied to design 2 (vocabulary: blade template, K), 6.3, 6.4, 7 and the 16.1 row; the two Phase 1 open items of 16.2 are closed; Phase 2 item 1 updated.
 - **To discuss at the review: cost.** About 12 ms of scatter GPU for 2.1M visible blades at 1440p on the RTX 3060 Ti, against 2.5 ms in design 12; design 10.1 expected 1.5 to 2M visible blades within the budget. The spike has no density falloff (5.3) and casts every blade in every cascade (6.2 plans near casters in the first cascades only): both directly reduce the two halves measured. Phase 2 can measure them on the real pipeline.
+- Final validation (RTX 3060 Ti, D3D12): Edit Mode 61/61, Play Mode 28/28 in the Editor, Play Mode in a Windows player 25/28 with 3 ignored (the cases of `Render_BothBackends_ShadeTheSame` containing the shadow term, known difference above).
 - Debug views (F8, `SpikeDebugView`): off, colour per draw, main light only, ambient only, shadow only, diffuse only. Added to compare the backends term by term.
 - `Scatter Prototype > Build Spike Development Player` (`PrototypeBuild.BuildSpikeDevelopment`): development build of `Spike_Draw` alone, for the Frame Debugger and the Profiler attached to a player.
 - The cull reserves entries with one atomic add per thread group and LOD (group shared counters), not one per instance.
@@ -145,6 +147,19 @@ Spike content: 1M blades on a flat grid, per-blade data (position, yaw) in a cus
   - `DepthNormals`: our 3 draws in the DepthNormals prepass that SSAO requests.
   - Depth priming (Forced): URP primes from the DepthNormals prepass (no separate depth prepass); the opaque pass draws our blades with ZTest Equal and ZWrite Off and they stay visible, so every pass computes the same vertex positions.
   - `MotionVectors` (TAA on the camera): our 3 draws in the pass, no visible trails when moving. Blades are static in the spike; wind and interaction come in Phases 6 to 8.
+
+---
+
+## Phase 1b - Cost investigation
+**Goal:** understand the scatter GPU cost measured in Phase 1 (about 12 ms for 2.1M visible blades at 1440p on the RTX 3060 Ti, design 12 budget 2.5 ms) before building Phase 2, and know which design levers reduce it. Work in the spike (`Spike_Draw`), measured with the S3 benchmark in a development player (Phase 1 notes, `Docs/Measurements`).
+
+1. [ ] **Vertex vs fragment:** benchmark mode `-spikeBenchmarkResolution`: BRG, mesh indirect and procedural indexed K16 at 4M blades, 2 views x URP render scale {1, 0.5, 0.25} x main light shadow map resolution {2048, 512}, with the baseline without scatter for each setting (36 cases). Both settings are changed at runtime on the URP asset (in memory in players) and restored at the end; CSV columns `renderScale` and `shadowResolution`. The part of depth + colour that does not shrink with the pixel count is vertex and triangle work; same for the shadow pass with its map resolution.
+2. [ ] **Density falloff** (design 5.2, 5.3) in the spike cull: keep a blade when its rank is below the density at its distance (100% up to 30 m, 25% at 80 m, 6% at 200 m). The rank is the instance index over the count (the R2 placement order: any prefix is evenly spread). Measure visible blades and cost against Phase 1.
+3. [ ] **Shadow casters** (design 6.2): blade casters submitted to the first cascades only (split visibility mask), and LOD0 only; measure the shadow pass against Phase 1.
+4. [ ] Tests: new benchmark plan and CSV columns, density rule against a C# reference, caster split masks; no allocation.
+5. [ ] Debug: HUD state of the density falloff and the caster settings (keys), counters of visible blades per LOD.
+
+**Exit:** a cost model (vertex, fragment and shadow cost per visible blade, and the part independent of the blade count), a revised estimate for design 10.1, and the resulting adjustments to Phase 2 (and design 5.3, 6.2 if needed). **Stop and review before Phase 2.**
 
 ---
 
