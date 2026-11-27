@@ -14,8 +14,16 @@ namespace Scatter.Rendering.Spike
         /// <summary>SPIKE_THREAD_GROUP_SIZE in SpikeCommon.hlsl.</summary>
         public const int ThreadGroupSize = 64;
 
-        /// <summary>SPIKE_ARGS_UINTS_PER_DRAW in SpikeCommon.hlsl: the size of <see cref="GraphicsBuffer.IndirectDrawIndexedArgs"/>.</summary>
-        public const int ArgsUIntsPerDraw = 5;
+        /// <summary>
+        /// SPIKE_ARGS_UINTS_PER_DRAW in SpikeCommon.hlsl: uints between two draws in <see cref="Args"/>. Each draw
+        /// writes <see cref="ArgsUIntsWritten"/> uints. 80 bytes is a multiple of the 20-byte
+        /// <see cref="GraphicsBuffer.IndirectDrawIndexedArgs"/> and the 16-byte <see cref="GraphicsBuffer.IndirectDrawArgs"/>,
+        /// which the Graphics.Render*Indirect calls address by command index (<see cref="GetCommandIndex"/>).
+        /// </summary>
+        public const int ArgsUIntsPerDraw = 20;
+
+        /// <summary>Uints written per draw: an <see cref="GraphicsBuffer.IndirectDrawIndexedArgs"/>.</summary>
+        public const int ArgsUIntsWritten = 5;
 
         /// <summary>SPIKE_EMPTY_ENTRY in SpikeCommon.hlsl: visible list padding after the last blade of a K-blade draw.</summary>
         public const uint EmptyEntry = 0xFFFFFFFF;
@@ -136,6 +144,16 @@ namespace Scatter.Rendering.Spike
         public static int GetArgsOffsetBytes(int draw)
         {
             return draw * ArgsUIntsPerDraw * sizeof(uint);
+        }
+
+        /// <summary>
+        /// Index of the arguments of <paramref name="draw"/> for the Graphics.Render*Indirect calls, which count in
+        /// commands of <paramref name="commandSizeBytes"/> (<see cref="GraphicsBuffer.IndirectDrawIndexedArgs.size"/> or
+        /// <see cref="GraphicsBuffer.IndirectDrawArgs.size"/>).
+        /// </summary>
+        public static int GetCommandIndex(int draw, int commandSizeBytes)
+        {
+            return GetArgsOffsetBytes(draw) / commandSizeBytes;
         }
 
         /// <summary>Sets the draws whose arguments the finalize kernel writes. Settings change only: uploads data.</summary>

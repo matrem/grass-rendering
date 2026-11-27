@@ -17,9 +17,11 @@
 #define SPIKE_DRAW_PROCEDURAL_INDIRECT 1u
 #define SPIKE_DRAW_PROCEDURAL_INDEXED_INDIRECT 2u
 
-// Uints per draw in the draw arguments buffer: the size of GraphicsBuffer.IndirectDrawIndexedArgs.
-// Non-indexed procedural draws use the first 4. Mirrored by SpikeCuller.ArgsUIntsPerDraw.
-#define SPIKE_ARGS_UINTS_PER_DRAW 5u
+// Uints between two draws in the draw arguments buffer. Each draw writes 5 uints (IndirectDrawIndexedArgs;
+// non-indexed procedural draws read the first 4, IndirectDrawArgs). The Graphics.Render*Indirect calls address
+// arguments by command index (20-byte or 16-byte commands): 20 uints = 80 bytes is a multiple of both.
+// Mirrored by SpikeCuller.ArgsUIntsPerDraw.
+#define SPIKE_ARGS_UINTS_PER_DRAW 20u
 
 // PCG hash (Jarzynski and Olano, "Hash Functions for GPU Rendering", JCGT 2020).
 uint SpikeHash(uint value)

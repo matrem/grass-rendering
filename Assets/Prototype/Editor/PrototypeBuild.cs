@@ -12,16 +12,33 @@ namespace Prototype.Editor
     public static class PrototypeBuild
     {
         private const string WindowsOutputPath = "Builds/Windows/GrassRendering.exe";
+        private const string SpikeDevelopmentOutputPath = "Builds/WindowsSpikeDevelopment/GrassRendering.exe";
+        private const string SpikeScenePath = "Assets/Scenes/Spike_Draw.unity";
 
         [MenuItem("Scatter Prototype/Build Windows Player")]
         public static void BuildWindows()
         {
+            Build(EditorBuildSettings.scenes.Where(scene => scene.enabled).Select(scene => scene.path).ToArray(), WindowsOutputPath, BuildOptions.None);
+        }
+
+        /// <summary>
+        /// Development build of the spike scene alone: the Frame Debugger and the Profiler can attach to it
+        /// (Frame Debugger target dropdown). Output in Builds/WindowsSpikeDevelopment.
+        /// </summary>
+        [MenuItem("Scatter Prototype/Build Spike Development Player")]
+        public static void BuildSpikeDevelopment()
+        {
+            Build(new[] { SpikeScenePath }, SpikeDevelopmentOutputPath, BuildOptions.Development | BuildOptions.ConnectWithProfiler);
+        }
+
+        private static void Build(string[] scenes, string outputPath, BuildOptions buildOptions)
+        {
             var options = new BuildPlayerOptions
             {
-                scenes = EditorBuildSettings.scenes.Where(scene => scene.enabled).Select(scene => scene.path).ToArray(),
-                locationPathName = WindowsOutputPath,
+                scenes = scenes,
+                locationPathName = outputPath,
                 target = BuildTarget.StandaloneWindows64,
-                options = BuildOptions.None,
+                options = buildOptions,
             };
 
             BuildReport report = BuildPipeline.BuildPlayer(options);

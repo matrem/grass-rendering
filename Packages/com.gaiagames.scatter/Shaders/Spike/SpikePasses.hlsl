@@ -14,7 +14,9 @@
     #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/MotionVectorsCommon.hlsl"
 #endif
 
-// Debug view (design 12.2), one global value: 0 = shading, 1 = colour per draw (_DebugColor: LOD, variant).
+// Debug view (design 12.2), one global value: 0 = shading, 1 = colour per draw (_DebugColor: LOD, variant),
+// 2 = main light only (colour x diffuse x shadow), 3 = ambient only (SampleSH), 4 = main light shadow only,
+// 5 = diffuse term only (wrapped N.L, with the side seen). Values mirrored by SpikeDebugView.
 float _ScatterDebugView;
 
 #if defined(SPIKE_PASS_SHADOW_CASTER)
@@ -30,6 +32,8 @@ struct Varyings
     float3 positionWS : TEXCOORD0;
     float3 normalWS : TEXCOORD1;
     float heightFraction : TEXCOORD2;
+    half3 ambientFront : TEXCOORD3;
+    half3 ambientBack : TEXCOORD4;
 #elif defined(SPIKE_PASS_DEPTH_NORMALS)
     float3 normalWS : TEXCOORD1;
 #elif defined(SPIKE_PASS_MOTION_VECTORS)
@@ -66,6 +70,11 @@ Varyings SpikeVertex(Attributes input)
     output.positionWS = surface.positionWS;
     output.normalWS = surface.normalWS;
     output.heightFraction = surface.heightFraction;
+    // Ambient per vertex, in the stage where the instance setup ran: with BRG, SampleSH reads the SH values
+    // that UNITY_SETUP_INSTANCE_ID samples (unity_DOTS_Sampled_SH*), which are 0 in a stage without the setup.
+    // Blades are double-sided: both sides, chosen per pixel.
+    output.ambientFront = SampleSH(surface.normalWS);
+    output.ambientBack = SampleSH(-surface.normalWS);
 #elif defined(SPIKE_PASS_DEPTH_NORMALS)
     output.normalWS = surface.normalWS;
 #elif defined(SPIKE_PASS_MOTION_VECTORS)
@@ -82,7 +91,7 @@ half4 SpikeFragment(Varyings input, bool isFrontFace : SV_IsFrontFace) : SV_Targ
 {
     half3 normalWS = normalize(input.normalWS) * (isFrontFace ? 1.0 : -1.0);
     half3 albedo = SpikeAlbedo(input.heightFraction);
-    if (_ScatterDebugView > 0.5)
+    if (_ScatterDebugView > 0.5 && _ScatterDebugView < 1.5)
     {
         return half4(_DebugColor.rgb * lerp(0.5, 1.0, input.heightFraction), 1.0);
     }
@@ -90,8 +99,18 @@ half4 SpikeFragment(Varyings input, bool isFrontFace : SV_IsFrontFace) : SV_Targ
     Light mainLight = GetMainLight(TransformWorldToShadowCoord(input.positionWS));
     // Wrapped diffuse: thin blades also get light from behind (translucency comes in Phase 8).
     half diffuse = saturate(dot(normalWS, mainLight.direction) * 0.6 + 0.4);
-    half3 lighting = mainLight.color * (diffuse * mainLight.shadowAttenuation) + SampleSH(normalWS);
-    return half4(albedo * lighting, 1.0);
+    half3 direct = mainLight.color * (diffuse * mainLight.distanceAttenuation * mainLight.shadowAttenuation);
+    half3 ambient = isFrontFace ? input.ambientFront : input.ambientBack;
+    if (_ScatterDebugView > 1.5)
+    {
+        half3 view = _ScatterDebugView < 2.5 ? direct
+            : _ScatterDebugView < 3.5 ? ambient
+            : _ScatterDebugView < 4.5 ? mainLight.shadowAttenuation.xxx
+            : diffuse.xxx;
+        return half4(view, 1.0);
+    }
+
+    return half4(albedo * (direct + ambient), 1.0);
 }
 #elif defined(SPIKE_PASS_DEPTH_ONLY)
 half SpikeFragment(Varyings input) : SV_Target

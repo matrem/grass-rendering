@@ -20,6 +20,7 @@ namespace Scatter.Rendering.Spike
         public int BladesPerInstance;
         public SpikeDrawType BladeDrawType;
         public SpikeRegionOffsetMode OffsetMode;
+        public SpikeBackend Backend;
         public bool ObjectsEnabled;
 
         public static ScatterSpikeConfig Default => new ScatterSpikeConfig
@@ -36,6 +37,7 @@ namespace Scatter.Rendering.Spike
             BladesPerInstance = 16,
             BladeDrawType = SpikeDrawType.MeshIndirect,
             OffsetMode = SpikeRegionOffsetMode.VisibleOffset,
+            Backend = SpikeBackend.Brg,
             ObjectsEnabled = true,
         };
     }

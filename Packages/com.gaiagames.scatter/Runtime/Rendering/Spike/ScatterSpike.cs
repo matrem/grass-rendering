@@ -10,7 +10,7 @@ namespace Scatter.Rendering.Spike
     /// <summary>
     /// Scene driver of the Phase 1 spike: holds the settings, handles the keys and feeds the debug HUD.
     /// The work is done by <see cref="ScatterSpikeSystem"/>.
-    /// Keys: F3 blade draw type, F4 region offset mode, F5 blade count, F6 K, F7 objects, F8 debug view.
+    /// Keys: F3 blade draw type, F4 region offset mode, F5 blade count, F6 K, F7 objects, F8 debug view (SpikeDebugView), F9 backend.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class ScatterSpike : MonoBehaviour
@@ -68,6 +68,9 @@ namespace Scatter.Rendering.Spike
         [SerializeField, Range(1, SpikeCuller.MaxBladesPerInstance), Tooltip("K: blades per instance of procedural indexed draws (F6 cycles).")]
         private int _bladesPerInstance = 16;
 
+        [SerializeField, Tooltip("Draw backend at start (F9 switches): BRG or the Graphics.Render*Indirect baseline.")]
+        private SpikeBackend _backend = SpikeBackend.Brg;
+
 #if SCATTER_INPUT_SYSTEM
         [SerializeField, Tooltip("Key cycling the blade draw type.")]
         private Key _drawTypeKey = Key.F3;
@@ -84,14 +87,17 @@ namespace Scatter.Rendering.Spike
         [SerializeField, Tooltip("Key toggling the Object layer.")]
         private Key _objectsKey = Key.F7;
 
-        [SerializeField, Tooltip("Key toggling the debug view (colour per draw).")]
+        [SerializeField, Tooltip("Key cycling the debug views: off, colour per draw, main light only, ambient only.")]
         private Key _debugViewKey = Key.F8;
+
+        [SerializeField, Tooltip("Key switching the draw backend.")]
+        private Key _backendKey = Key.F9;
 #endif
 
         private readonly StringBuilder _status = new StringBuilder(256);
         private ScatterSpikeSystem _system;
         private int _bladeCountStep;
-        private bool _debugView;
+        private SpikeDebugView _debugView;
         private float _nextStatsTime;
 
         public ScatterSpikeSystem System => _system;
@@ -130,6 +136,7 @@ namespace Scatter.Rendering.Spike
             config.BladesPerInstance = _bladesPerInstance;
             config.BladeDrawType = _bladeDrawType;
             config.OffsetMode = _offsetMode;
+            config.Backend = _backend;
             _system = new ScatterSpikeSystem(_resources, config);
             Shader.SetGlobalFloat(s_DebugView, 0f);
             UpdateStatus();
@@ -228,10 +235,16 @@ namespace Scatter.Rendering.Spike
                 changed = true;
             }
 
+            if (keyboard[_backendKey].wasPressedThisFrame)
+            {
+                _system.SetBackend(_system.Config.Backend == SpikeBackend.Brg ? SpikeBackend.Indirect : SpikeBackend.Brg);
+                changed = true;
+            }
+
             if (keyboard[_debugViewKey].wasPressedThisFrame)
             {
-                _debugView = !_debugView;
-                Shader.SetGlobalFloat(s_DebugView, _debugView ? 1f : 0f);
+                _debugView = (SpikeDebugView)(((int)_debugView + 1) % 6);
+                Shader.SetGlobalFloat(s_DebugView, (float)_debugView);
                 changed = true;
             }
 
@@ -265,16 +278,21 @@ namespace Scatter.Rendering.Spike
 
             ScatterSpikeConfig config = _system.Config;
             _status.Clear();
-            _status.Append("Spike (BRG)\n  [F3] blades ").Append(config.BladeDrawType);
+            _status.Append("Spike  [F9] backend ").Append(config.Backend);
+            _status.Append("\n  [F3] blades ").Append(config.BladeDrawType);
             if (config.BladeDrawType == SpikeDrawType.ProceduralIndexedIndirect)
             {
                 _status.Append("  [F6] K ").Append(config.BladesPerInstance);
             }
 
-            _status.Append("\n  [F4] offset ").Append(config.OffsetMode);
+            if (config.Backend == SpikeBackend.Brg)
+            {
+                _status.Append("\n  [F4] offset ").Append(config.OffsetMode);
+            }
+
             _status.Append("\n  [F5] blades ").Append(config.BladeCount);
             _status.Append("  [F7] objects ").Append(config.ObjectsEnabled ? config.ObjectCount : 0);
-            _status.Append("  [F8] debug view ").Append(_debugView ? "on" : "off");
+            _status.Append("  [F8] view ").Append(_debugView);
             _status.Append("\n  visible LOD0 ").Append(_system.GetCounter(ScatterSpikeSystem.BladeLod0Region));
             _status.Append("  LOD1 ").Append(_system.GetCounter(ScatterSpikeSystem.BladeLod1Region));
             _status.Append("  objects ").Append(_system.GetCounter(ScatterSpikeSystem.ObjectRegion));

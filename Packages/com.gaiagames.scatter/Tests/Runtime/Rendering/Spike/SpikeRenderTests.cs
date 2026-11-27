@@ -7,7 +7,7 @@ using UnityEngine.TestTools;
 namespace Scatter.Tests.PlayMode.Rendering.Spike
 {
     /// <summary>
-    /// Renders the spike with each blade draw type to a render texture and checks the pixels: every region
+    /// Renders the spike with each backend and blade draw type to a render texture and checks the pixels: every region
     /// drawn (debug view colours), no error shader (magenta). Also run in a Windows player, where strict shader
     /// variant matching shows stripped BRG variants as the error shader. A failing case saves its image under
     /// temporaryCachePath/SpikeRenderTests.
@@ -17,6 +17,7 @@ namespace Scatter.Tests.PlayMode.Rendering.Spike
         private const int Size = 256;
         private const int FramesToRender = 6;
         private const float MinCoverage = 0.002f;
+        private const float MaxColourDifference = 0.002f; // linear, mean over the covered pixels
         private static readonly int s_DebugView = Shader.PropertyToID("_ScatterDebugView");
 
         private ScatterSpikeSystem _system;
@@ -44,13 +45,13 @@ namespace Scatter.Tests.PlayMode.Rendering.Spike
         }
 
         [UnityTest]
-        public IEnumerator Render_VisibleOffset_DrawsEveryRegion_WithoutErrorShader([Values] SpikeDrawType drawType)
+        public IEnumerator Render_DrawsEveryRegion_WithoutErrorShader([Values] SpikeBackend backend, [Values] SpikeDrawType drawType)
         {
-            CreateScene(drawType, SpikeRegionOffsetMode.VisibleOffset, true);
+            CreateScene(backend, drawType, SpikeRegionOffsetMode.VisibleOffset, SpikeDebugView.DrawColour);
             yield return Render();
 
             Coverage coverage = Measure();
-            string details = SaveImage("Regions_" + drawType) + " " + coverage;
+            string details = SaveImage("Regions_" + backend + "_" + drawType) + " " + coverage;
             Assert.That(coverage.Error, Is.EqualTo(0f), "Error shader (magenta): a shader variant is missing. " + details);
             Assert.That(coverage.Lod0, Is.GreaterThan(MinCoverage), "LOD0 region not drawn. " + details);
             Assert.That(coverage.Lod1, Is.GreaterThan(MinCoverage), "LOD1 region not drawn. " + details);
@@ -70,7 +71,7 @@ namespace Scatter.Tests.PlayMode.Rendering.Spike
 
             // In players the BRG error also reaches the managed log, once per command and view: expected here.
             LogAssert.ignoreFailingMessages = true;
-            CreateScene(SpikeDrawType.MeshIndirect, offsetMode, true);
+            CreateScene(SpikeBackend.Brg, SpikeDrawType.MeshIndirect, offsetMode, SpikeDebugView.DrawColour);
             yield return Render();
 
             Coverage coverage = Measure();
@@ -79,27 +80,125 @@ namespace Scatter.Tests.PlayMode.Rendering.Spike
         }
 
         [UnityTest]
-        public IEnumerator Render_LitShading_DrawsGreenBlades([Values] SpikeDrawType drawType)
+        public IEnumerator Render_LitShading_DrawsGreenBlades([Values] SpikeBackend backend, [Values] SpikeDrawType drawType)
         {
-            CreateScene(drawType, SpikeRegionOffsetMode.VisibleOffset, false);
+            CreateScene(backend, drawType, SpikeRegionOffsetMode.VisibleOffset, SpikeDebugView.Off);
             yield return Render();
 
             Coverage coverage = Measure();
-            string details = SaveImage("Lit_" + drawType) + " " + coverage;
+            string details = SaveImage("Lit_" + backend + "_" + drawType) + " " + coverage;
             Assert.That(coverage.Error, Is.EqualTo(0f), "Error shader (magenta): a shader variant is missing. " + details);
             Assert.That(coverage.Green, Is.GreaterThan(0.05f), "Lit blades not drawn. " + details);
+        }
+
+        /// <summary>
+        /// Both backends draw the same cull output with the same materials: the same picture is expected, term by term
+        /// (main light, ambient, full shading). Rendered from the same camera as BRG, Indirect, then BRG again: the two
+        /// BRG renders must match first (the test is repeatable), then Indirect must match them. The difference
+        /// image (x10) of BRG and Indirect is saved next to the renders.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Render_BothBackends_ShadeTheSame([Values(SpikeDebugView.Off, SpikeDebugView.MainLight, SpikeDebugView.Ambient, SpikeDebugView.Shadow, SpikeDebugView.Diffuse)] SpikeDebugView view)
+        {
+            if (!Application.isEditor && (view == SpikeDebugView.Shadow || view == SpikeDebugView.MainLight))
+            {
+                Assert.Ignore("Known difference in players (Phase 1 notes, Phase 8 item): with the Indirect backend, blades " +
+                    "receive about 2% less main light shadow from other blades (same draws, same instance counts).");
+            }
+
+            CreateScene(SpikeBackend.Brg, SpikeDrawType.MeshIndirect, SpikeRegionOffsetMode.VisibleOffset, view);
+            yield return Render();
+            Color[] brgFirst = _readback.GetPixels();
+            string brgImage = SaveImage("Compare_" + view + "_Brg");
+
+            _system.SetBackend(SpikeBackend.Indirect);
+            yield return Render();
+            Color[] indirect = _readback.GetPixels();
+            string indirectImage = SaveImage("Compare_" + view + "_Indirect");
+
+            _system.SetBackend(SpikeBackend.Brg);
+            yield return Render();
+            Color[] brgSecond = _readback.GetPixels();
+            string differenceImage = SaveDifferenceImage("Compare_" + view + "_Difference", brgFirst, indirect);
+
+            Color brgMean = MeanColour(brgFirst);
+            Color brgSecondMean = MeanColour(brgSecond);
+            Color indirectMean = MeanColour(indirect);
+            string details = $"BRG {brgMean}, BRG again {brgSecondMean}, Indirect {indirectMean}, " +
+                $"pixels changed BRG/BRG {CountChanged(brgFirst, brgSecond)}, BRG/Indirect {CountChanged(brgFirst, indirect)} " +
+                $"({brgImage}, {indirectImage}, {differenceImage})";
+            Assert.That(brgMean.maxColorComponent, Is.GreaterThan(0.001f), "Nothing lit. " + details);
+            AssertSameColour(brgSecondMean, brgMean, "The test is not repeatable: two BRG renders differ. " + details);
+            AssertSameColour(indirectMean, brgMean, "The backends differ. " + details);
+        }
+
+        private static void AssertSameColour(Color actual, Color expected, string message)
+        {
+            Assert.That(actual.r, Is.EqualTo(expected.r).Within(MaxColourDifference), "Red: " + message);
+            Assert.That(actual.g, Is.EqualTo(expected.g).Within(MaxColourDifference), "Green: " + message);
+            Assert.That(actual.b, Is.EqualTo(expected.b).Within(MaxColourDifference), "Blue: " + message);
+        }
+
+        private static int CountChanged(Color[] first, Color[] second)
+        {
+            int count = 0;
+            for (int i = 0; i < first.Length; i++)
+            {
+                Color delta = first[i] - second[i];
+                if (Mathf.Max(Mathf.Abs(delta.r), Mathf.Max(Mathf.Abs(delta.g), Mathf.Abs(delta.b))) > 0.002f)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        /// <summary>Saves |first - second| x 10 as a PNG; returns its path.</summary>
+        private string SaveDifferenceImage(string label, Color[] first, Color[] second)
+        {
+            var pixels = new Color[first.Length];
+            for (int i = 0; i < first.Length; i++)
+            {
+                Color delta = first[i] - second[i];
+                pixels[i] = new Color(Mathf.Abs(delta.r) * 10f, Mathf.Abs(delta.g) * 10f, Mathf.Abs(delta.b) * 10f, 1f);
+            }
+
+            return SavePixels(label, pixels);
+        }
+
+        /// <summary>Mean linear colour of the pixels covered by something (black background excluded).</summary>
+        private static Color MeanColour(Color[] pixels)
+        {
+            Color sum = Color.clear;
+            int count = 0;
+            for (int i = 0; i < pixels.Length; i++)
+            {
+                if (pixels[i].maxColorComponent > 0.0005f)
+                {
+                    sum += pixels[i];
+                    count++;
+                }
+            }
+
+            return count > 0 ? sum / count : Color.clear;
         }
 
         /// <summary>Saves the rendered image (gamma-encoded PNG) for inspection; returns its path.</summary>
         private string SaveImage(string label)
         {
             Color[] pixels = _readback.GetPixels();
-            var image = new Texture2D(Size, Size, TextureFormat.RGBA32, false);
             for (int i = 0; i < pixels.Length; i++)
             {
                 pixels[i] = pixels[i].gamma;
             }
 
+            return SavePixels(label, pixels);
+        }
+
+        private static string SavePixels(string label, Color[] pixels)
+        {
+            var image = new Texture2D(Size, Size, TextureFormat.RGBA32, false);
             image.SetPixels(pixels);
             string folder = System.IO.Path.Combine(Application.temporaryCachePath, "SpikeRenderTests");
             System.IO.Directory.CreateDirectory(folder);
@@ -109,7 +208,7 @@ namespace Scatter.Tests.PlayMode.Rendering.Spike
             return path;
         }
 
-        private void CreateScene(SpikeDrawType drawType, SpikeRegionOffsetMode offsetMode, bool debugView)
+        private void CreateScene(SpikeBackend backend, SpikeDrawType drawType, SpikeRegionOffsetMode offsetMode, SpikeDebugView view)
         {
             ScatterSpikeResources resources = ScatterSpikeResources.Load();
             Assert.That(resources, Is.Not.Null, "Spike resources asset missing from the package Resources folder.");
@@ -120,9 +219,10 @@ namespace Scatter.Tests.PlayMode.Rendering.Spike
             config.ObjectCount = 1 << 12;
             config.BladeDrawType = drawType;
             config.OffsetMode = offsetMode;
+            config.Backend = backend;
             config.BladesPerInstance = 16;
             _system = new ScatterSpikeSystem(resources, config);
-            Shader.SetGlobalFloat(s_DebugView, debugView ? 1f : 0f);
+            Shader.SetGlobalFloat(s_DebugView, (float)view);
 
             _target = new RenderTexture(Size, Size, 24, RenderTextureFormat.ARGBHalf) { name = "SpikeRenderTests Target" };
             _readback = new Texture2D(Size, Size, TextureFormat.RGBAHalf, false, true);

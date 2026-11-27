@@ -86,16 +86,15 @@ void ResetSpikeCounters(uint3 dispatchId : SV_DispatchThreadID)
 
 bool IsInFrustum(float3 position, float radius)
 {
+    // No early return inside the unrolled loop: the Vulkan compiler warns about it.
+    bool inside = true;
     [unroll]
     for (uint i = 0; i < 6; i++)
     {
-        if (dot(_SpikeFrustumPlanes[i].xyz, position) + _SpikeFrustumPlanes[i].w < -radius)
-        {
-            return false;
-        }
+        inside = inside && dot(_SpikeFrustumPlanes[i].xyz, position) + _SpikeFrustumPlanes[i].w >= -radius;
     }
 
-    return true;
+    return inside;
 }
 
 [numthreads(SPIKE_THREAD_GROUP_SIZE, 1, 1)]

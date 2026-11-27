@@ -70,6 +70,20 @@ namespace Scatter.Tests.Rendering.Spike
             Assert.That(UnsafeUtility.SizeOf<SpikeDrawDescriptor>(), Is.EqualTo(SpikeDrawDescriptor.SizeBytes));
         }
 
+        [TestCase(0)]
+        [TestCase(1)]
+        [TestCase(6)]
+        public void ArgsOffsets_AreWholeCommandsForBothCommandSizes(int draw)
+        {
+            int offsetBytes = SpikeCuller.GetArgsOffsetBytes(draw);
+            int indexed = GraphicsBuffer.IndirectDrawIndexedArgs.size;
+            int nonIndexed = GraphicsBuffer.IndirectDrawArgs.size;
+
+            Assert.That(SpikeCuller.GetCommandIndex(draw, indexed) * indexed, Is.EqualTo(offsetBytes));
+            Assert.That(SpikeCuller.GetCommandIndex(draw, nonIndexed) * nonIndexed, Is.EqualTo(offsetBytes));
+            Assert.That(SpikeCuller.ArgsUIntsWritten * sizeof(uint), Is.EqualTo(indexed));
+        }
+
         [Test]
         public void RegionCapacities_AreRoundedToTheLargestK()
         {
@@ -98,7 +112,8 @@ namespace Scatter.Tests.Rendering.Spike
 
             uint[] counters = Read(culler.Counters, culler.RegionCount + 1);
             uint[] visible = Read(culler.VisibleList, culler.VisibleEntryCount);
-            uint[] args = Read(culler.Args, 2 * SpikeCuller.ArgsUIntsPerDraw);
+            uint[] args0 = ReadArgs(culler, 0);
+            uint[] args1 = ReadArgs(culler, 1);
             Reference(instances, cameraPosition, planes, out HashSet<uint> lod0, out HashSet<uint> lod1, out HashSet<uint> ambiguous);
 
             Assert.That(lod0.Count, Is.GreaterThan(0), "Test setup: no instance in LOD0.");
@@ -106,7 +121,8 @@ namespace Scatter.Tests.Rendering.Spike
             AssertRegion(visible, culler.GetRegionStart(Lod0Region), counters[Lod0Region], lod0, ambiguous, "LOD0");
             AssertRegion(visible, culler.GetRegionStart(Lod1Region), counters[Lod1Region], lod1, ambiguous, "LOD1");
             Assert.That(counters[culler.OverflowCounterIndex], Is.EqualTo(0u));
-            Assert.That(args, Is.EqualTo(new uint[] { 15, counters[Lod0Region], 0, 0, 0, 9, counters[Lod1Region], 0, 0, 0 }));
+            Assert.That(args0, Is.EqualTo(new uint[] { 15, counters[Lod0Region], 0, 0, 0 }));
+            Assert.That(args1, Is.EqualTo(new uint[] { 9, counters[Lod1Region], 0, 0, 0 }));
         }
 
         [Test]
@@ -147,7 +163,7 @@ namespace Scatter.Tests.Rendering.Spike
 
             uint[] counters = Read(culler.Counters, culler.RegionCount + 1);
             uint[] visible = Read(culler.VisibleList, culler.VisibleEntryCount);
-            uint[] args = Read(culler.Args, SpikeCuller.ArgsUIntsPerDraw);
+            uint[] args = ReadArgs(culler, 0);
             int capacity = culler.GetRegionCapacity(Lod0Region);
             Assert.That(counters[Lod0Region], Is.EqualTo((uint)instances.Length));
             Assert.That(counters[culler.OverflowCounterIndex], Is.EqualTo((uint)(instances.Length - capacity)));
@@ -180,7 +196,7 @@ namespace Scatter.Tests.Rendering.Spike
 
             uint[] counters = Read(culler.Counters, culler.RegionCount + 1);
             uint[] visible = Read(culler.VisibleList, culler.VisibleEntryCount);
-            uint[] args = Read(culler.Args, SpikeCuller.ArgsUIntsPerDraw);
+            uint[] args = ReadArgs(culler, 0);
             Assert.That(counters[Lod0Region], Is.EqualTo(37u), "Test setup: all instances visible.");
             Assert.That(args, Is.EqualTo(new uint[] { (uint)(15 * bladesPerInstance), expectedInstances, 0, 0, 0 }));
             uint padded = expectedInstances * (uint)bladesPerInstance;
@@ -351,6 +367,14 @@ namespace Scatter.Tests.Rendering.Spike
             {
                 Assert.That(actual.Contains(index), Is.True, $"{label}: visible instance {index} is missing.");
             }
+        }
+
+        /// <summary>The <see cref="SpikeCuller.ArgsUIntsWritten"/> uints of one draw.</summary>
+        private static uint[] ReadArgs(SpikeCuller culler, int draw)
+        {
+            var args = new uint[SpikeCuller.ArgsUIntsWritten];
+            culler.Args.GetData(args, 0, draw * SpikeCuller.ArgsUIntsPerDraw, args.Length);
+            return args;
         }
 
         private static uint[] Read(GraphicsBuffer buffer, int count)

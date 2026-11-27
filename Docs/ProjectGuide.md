@@ -21,7 +21,8 @@ Current state: **Phase 1 in progress** (spikes). On top of the Phase 0 skeleton 
 | Tests and command-line runs | Done | `Tests/Editor`, `Tests/Runtime` |
 | Windows build script | Done | `Assets/Prototype/Editor/PrototypeBuild.cs` |
 | BRG draw spike (Phase 1, S1): spike cull, BRG backend, spike shaders, blade mesh factory | Done: three blade draw types and the rock layer drawn by BRG in all five passes | `Runtime/Rendering`, `Shaders/Spike`, `Assets/Scenes/Spike_Draw.unity` |
-| RenderMeshIndirect baseline (S2), timings (S3) | Not started | |
+| Graphics.Render*Indirect baseline (S2): same draws without BRG, F9 switches | Done: same draws and shading as BRG, all five passes checked | `Runtime/Rendering/Spike/SpikeIndirectRenderer.cs` |
+| Timings and K sweep (S3) | Not started | |
 | Generation, layers, terrain adapter, wind, interaction | Not started (Phases 2 to 8) | design 3 to 8 |
 
 ---
@@ -157,7 +158,9 @@ flowchart TB
     C2 --> F["SpikeCuller.RecordFinalize<br/>draw arguments, K padding"]
     F --> VIS[("Visible list<br/>regions: blade LOD0, blade LOD1, objects")]
     F --> ARGS[("Draw arguments<br/>one entry per draw")]
-    B["SpikeBrgRenderer.OnPerformCulling<br/>camera and shadow views"] --> D["Indirect draws<br/>visibleOffset = region start"]
+    B["Backend BRG: SpikeBrgRenderer.OnPerformCulling<br/>camera and shadow views, visibleOffset = region start"] --> D["Indirect draws"]
+    F --> I["Backend Indirect: SpikeIndirectRenderer.Submit<br/>Graphics.Render*Indirect, _RegionStart in the material"]
+    I --> D
     VIS --> D
     ARGS --> D
     INST[("Instance buffers<br/>xyz position, yaw")] --> D
@@ -166,9 +169,10 @@ flowchart TB
 | Class | Role |
 |---|---|
 | `ScatterSpike` | MonoBehaviour driver of the scene `Spike_Draw`: settings, keys (5.3), HUD status and timings. Runs the system in `LateUpdate`, after the camera moved. |
-| `ScatterSpikeSystem` | Owns everything below; creates the content at startup (4M blades, 16k rocks), the materials and the 7 BRG draws (3 blade draw types x 2 LODs, plus the rocks). `Tick` culls for one camera and requests the debug counters (non-blocking readback). |
+| `ScatterSpikeSystem` | Owns everything below; creates the content at startup (4M blades, 16k rocks), the materials and the 7 draws (3 blade draw types x 2 LODs, plus the rocks) in both backends; only the draws of the selected backend and blade draw type are enabled. `Tick` culls for one camera and requests the debug counters (non-blocking readback). |
 | `SpikeCuller` | Visible list (raw buffer, 4-byte indices) with its regions, region counters, draw arguments. Records the kernels of `SpikeCull.compute`: placement (R2 sequence), counter reset, cull (one atomic add per thread group and LOD, overflow guard), args finalize. |
 | `SpikeBrgRenderer` | The `BatchRendererGroup`: one batch with no metadata; in `OnPerformCulling` writes the enabled draws (mesh indirect or procedural indirect) for the camera, and the shadow casters for every shadow split. Regions are addressed with `visibleOffset`. |
+| `SpikeIndirectRenderer` | Baseline backend (S2): the same draws queued every frame with `Graphics.RenderMeshIndirect`, `RenderPrimitivesIndirect` and `RenderPrimitivesIndexedIndirect`. The arguments are addressed by command index (`SpikeCuller.GetCommandIndex`). |
 | `BladeMeshFactory` | Blade mesh LODs (3 segments = 7 vertices, 2 = 5, 1 = 3) and the index buffer drawing K blades per instance. Kept for Phase 2. |
 | `ScatterSpikeResources` | ScriptableObject with the spike shaders and the rock mesh, in the package `Resources` folder. |
 
@@ -210,7 +214,8 @@ The spike shows its state under the HUD header, with the counters read back from
 | F5 | Blade count: 256k, 1M, 2M, 4M |
 | F6 | K, blades per instance of the procedural indexed draws: 2 to 64 |
 | F7 | Object layer (rocks) on or off |
-| F8 | Debug view: colour per draw (red, green, blue for the three blade draw types; lighter for LOD1; rocks white). Global shader value `_ScatterDebugView` (design 12.2). |
+| F8 | Debug views (`SpikeDebugView`, global shader value `_ScatterDebugView`, design 12.2): off; colour per draw (red, green, blue for the three blade draw types, lighter for LOD1, rocks white); main light only; ambient only; main light shadow only; diffuse term only. |
+| F9 | Backend: BRG or the Graphics.Render*Indirect baseline (S2). F4 only applies to BRG. |
 
 ### 5.4 Limits
 - **GC allocated in frame** is not available in release players (shown as "-"). Check it in the Editor or in a development build.
@@ -266,6 +271,7 @@ Both quality levels use the URP asset `PC_RPAsset` for now. All values are start
 | Windows graphics APIs | Direct3D 12, then Vulkan | Compute shaders and indirect draws |
 | Frame Timing Stats | On | CPU and GPU times in players (HUD) |
 | Strict shader variant matching | On | In players, a missing shader variant draws with the error shader (magenta) and logs the shader and keywords, instead of silently using the closest variant. Makes stripped variants (for example the BRG variants) visible at once. |
+| `PC_Renderer` > Depth Priming Mode | Auto | SSAO (source DepthNormals) already runs a DepthNormals prepass of the blades: priming reuses that depth in the colour pass (ZTest Equal), so overlapping blades are shaded once at no extra vertex cost. Needs MSAA off (it is). On/off measured in Phase 9 (design 8.1). |
 | Graphics Settings > BatchRendererGroup Variants | Keep All (`m_BrgStripping: 2`) | The default strips the `DOTS_INSTANCING_ON` variants BRG draws with when Entities Graphics is not installed (Phase 1 finding). Set by **Scatter Prototype > Create Spike Content**. |
 | Active input handling | Input System only | The HUD also supports the legacy Input Manager |
 | Incremental GC | On | Shorter GC pauses |
@@ -278,8 +284,8 @@ Both quality levels use the URP asset `PC_RPAsset` for now. All values are start
 
 | Assembly | Mode | Tests |
 |---|---|---|
-| `Scatter.Tests` | Edit Mode | `FrameTimeHistoryTests` (nearest-rank percentile, few samples, wrap-around past capacity, no allocation), `ScatterCsvLoggerTests` (header and rows, `NaN` written as an empty cell, dot decimal under a comma-decimal culture, dropped rows, no allocation), `FrameStatsSamplerTests` (no allocation), `ScatterHudTextTests` (values over the tier target in red, `NaN` shown as `-`, GC allocation `-` / `0 B` / red, driver status lines after the tier), `ScatterQualityTests` (quality level clamped to the tier list, no tiers gives null), `BladeMeshFactoryTests` (vertex and index counts per LOD, same winding for every triangle, multi-blade index offsets), `SpikeCullerTests` (GPU: thread group size and descriptor size match HLSL, region capacities, cull vs a C# reference per region, counter reset, overflow counted and never past the region, K padding, placement deterministic and even for any prefix, no allocation), `SpikeBrgRendererTests` (commands per view: camera, shadow splits, other views; region offset modes; index buffer of K-blade draws; no allocation), `ScatterSpikeSystemTests` (all regions filled, settings changes, `Tick` does not allocate, with and without the stats readback) |
-| `Scatter.Tests.PlayMode` | Play Mode | `ScatterDebugHudTests` (samples frames; label attached by the Panel Renderer, whether the panel loads before or after the HUD; label attached again after disable and enable; `Visible` hides the label; CSV written by `StopRecording` and when the HUD is disabled while recording, header and one row per frame; the test deletes the file), `SpikeRenderTests` (renders the spike to a render texture for each blade draw type: every region drawn, checked by the debug view colours, lit blades drawn, no error shader; the window offset draws nothing on raw-buffer APIs. The image of each case is saved under `temporaryCachePath/SpikeRenderTests`) |
+| `Scatter.Tests` | Edit Mode | `FrameTimeHistoryTests` (nearest-rank percentile, few samples, wrap-around past capacity, no allocation), `ScatterCsvLoggerTests` (header and rows, `NaN` written as an empty cell, dot decimal under a comma-decimal culture, dropped rows, no allocation), `FrameStatsSamplerTests` (no allocation), `ScatterHudTextTests` (values over the tier target in red, `NaN` shown as `-`, GC allocation `-` / `0 B` / red, driver status lines after the tier), `ScatterQualityTests` (quality level clamped to the tier list, no tiers gives null), `BladeMeshFactoryTests` (vertex and index counts per LOD, same winding for every triangle, multi-blade index offsets), `SpikeCullerTests` (GPU: thread group size and descriptor size match HLSL, region capacities, argument offsets are whole commands for both command sizes, cull vs a C# reference per region, counter reset, overflow counted and never past the region, K padding, placement deterministic and even for any prefix, no allocation), `SpikeBrgRendererTests` (commands per view: camera, shadow splits, other views; region offset modes; index buffer of K-blade draws; no allocation), `ScatterSpikeSystemTests` (all regions filled, settings changes, `Tick` does not allocate, with and without the stats readback, with both backends) |
+| `Scatter.Tests.PlayMode` | Play Mode | `ScatterDebugHudTests` (samples frames; label attached by the Panel Renderer, whether the panel loads before or after the HUD; label attached again after disable and enable; `Visible` hides the label; CSV written by `StopRecording` and when the HUD is disabled while recording, header and one row per frame; the test deletes the file), `SpikeRenderTests` (renders the spike to a render texture for each backend and blade draw type: every region drawn, checked by the debug view colours, lit blades drawn, no error shader; the window offset draws nothing on raw-buffer APIs; both backends shade the same, term by term (full shading, main light, ambient, shadow, diffuse; rendered BRG, Indirect, BRG again to prove the test is repeatable, with a difference image). In players the shadow and main light cases are ignored: known difference (Phase 1 notes). The image of each case is saved under `temporaryCachePath/SpikeRenderTests`) |
 
 Conventions:
 - Every per-frame entry point has an allocation test: `Assert.That(() => ..., Is.Not.AllocatingGCMemory())`. With Test Framework 1.8 it needs `using UnityEngine.TestTools.Constraints;` and the alias `using Is = UnityEngine.TestTools.Constraints.Is;`.
@@ -303,6 +309,8 @@ How to run them: **Window > General > Test Runner** in the Editor (**Run all in 
 ## 10. Building
 
 **Scatter Prototype > Build Windows Player** in the Editor, or `Prototype.Editor.PrototypeBuild.BuildWindows` from the command line ([README](../README.md#command-line)). It builds the enabled scenes of the build settings into `Builds/Windows/GrassRendering.exe` and exits with code 1 in batch mode if the build fails.
+
+**Scatter Prototype > Build Spike Development Player** (`Prototype.Editor.PrototypeBuild.BuildSpikeDevelopment`): a development build of `Spike_Draw` alone, in `Builds/WindowsSpikeDevelopment`. The Frame Debugger and the Profiler of the Editor can attach to it (target dropdown at the top of their window).
 
 ---
 

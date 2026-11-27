@@ -324,10 +324,12 @@ All layers share the generation and cull compute shaders; each layer has its own
 ### 8.1 Shader passes (URP Forward+)
 Every scatter shader provides: `UniversalForward`, `ShadowCaster`, `DepthOnly`, `DepthNormals` (needed by depth priming, SSAO, decals) and `MotionVectors` (needed by TAA/STP). With depth priming enabled, a shader without `DepthOnly` is not drawn at all, so these passes exist from the first shader version. No alpha clipping on blades (geometry only), so early depth testing stays effective. Hand-written HLSL, not Shader Graph.
 
+The forward pass declares the URP Forward+ keyword `_CLUSTER_LIGHT_LOOP`, as URP Lit does: in Forward+ URP does not fill the per-object light data (`unity_LightData`), and `GetMainLight()` only ignores it on the cluster path (Phase 1 finding). Per-object values read through BRG (ambient SH) are sampled by `UNITY_SETUP_INSTANCE_ID`, in the shader stage where it runs: the vertex shader evaluates them (Phase 1 finding).
+
 Depth priming makes the vertex shader run twice for each blade (depth pass + colour pass). This removes overdraw shading but doubles vertex work, which is significant for grass: measured on and off in Phase 9.
 
 ### 8.2 Blade shading
-Root-to-tip colour gradient, per-blade tint, root ambient occlusion, cheap translucency, normal blended toward the ground normal (reads as a coherent mass), terrain albedo tint at the root. Forward+ additional lights through the URP cluster loop. Double-sided; far LOD slightly faces the camera.
+Root-to-tip colour gradient, per-blade tint, root ambient occlusion, cheap translucency, normal blended toward the ground normal (reads as a coherent mass), terrain albedo tint at the root. Forward+ additional lights through the URP cluster loop. Ambient: Unity's SH (`SampleSH`) evaluated per vertex, for both sides of the blade. Double-sided; far LOD slightly faces the camera.
 
 ### 8.3 Wind (vertex shader only)
 - Scrolling tileable noise sampled by world XZ, plus a larger, slower gust noise.

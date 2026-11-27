@@ -69,6 +69,16 @@ namespace Scatter.Tests.Rendering.Spike
         }
 
         [Test]
+        public void Tick_IndirectBackend_DoesNotAllocate()
+        {
+            _system.SetBackend(SpikeBackend.Indirect);
+            _system.Tick(_camera, false);
+            _system.Tick(_camera, false);
+
+            Assert.That(() => _system.Tick(_camera, false), Is.Not.AllocatingGCMemory());
+        }
+
+        [Test]
         public void SettingsChanges_SelectTheDrawsOfOneBladeDrawType()
         {
             _system.SetBladeDrawType(SpikeDrawType.ProceduralIndexedIndirect);

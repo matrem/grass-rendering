@@ -6,9 +6,10 @@ using UnityEngine.Rendering;
 namespace Scatter.Rendering.Spike
 {
     /// <summary>
-    /// The Phase 1 spike (Implementation Phase 1, S1): 1M+ blades and an Object layer, culled every frame into
-    /// one visible list with three regions (blade LOD0, blade LOD1, objects) and drawn by BRG with one of
-    /// three blade draw types. Everything is allocated in the constructor; <see cref="Tick"/> does not allocate.
+    /// The Phase 1 spike (Implementation Phase 1, S1 and S2): 1M+ blades and an Object layer, culled every frame into
+    /// one visible list with three regions (blade LOD0, blade LOD1, objects) and drawn with one of three blade draw
+    /// types, by BRG or by the Graphics.Render*Indirect baseline. Everything is allocated in the constructor;
+    /// <see cref="Tick"/> does not allocate.
     /// </summary>
     public sealed class ScatterSpikeSystem : IDisposable
     {
@@ -55,6 +56,8 @@ namespace Scatter.Rendering.Spike
 
         private readonly SpikeCuller _culler;
         private readonly SpikeBrgRenderer _brg;
+        private readonly SpikeIndirectRenderer _indirect;
+        private readonly Bounds _worldBounds;
         private readonly SpikeInstanceSet _blades;
         private readonly SpikeInstanceSet _objects;
         private readonly SpikeDrawDescriptor[] _drawDescriptors = new SpikeDrawDescriptor[DrawCount];
@@ -92,10 +95,11 @@ namespace Scatter.Rendering.Spike
             Graphics.ExecuteCommandBuffer(_cmd);
 
             Rect area = _config.AreaXZ;
-            var bounds = new Bounds(
+            _worldBounds = new Bounds(
                 new Vector3(area.center.x, BoundsHeightMeters * 0.5f, area.center.y),
                 new Vector3(area.width, BoundsHeightMeters, area.height));
-            _brg = new SpikeBrgRenderer(_culler, bounds, DrawCount) { OffsetMode = _config.OffsetMode };
+            _brg = new SpikeBrgRenderer(_culler, _worldBounds, DrawCount) { OffsetMode = _config.OffsetMode };
+            _indirect = new SpikeIndirectRenderer(_culler, DrawCount);
 
             _bladeMeshes[0] = BladeMeshFactory.CreateBladeMesh(Lod0SegmentCount, "Scatter Spike Blade LOD0");
             _bladeMeshes[1] = BladeMeshFactory.CreateBladeMesh(Lod1SegmentCount, "Scatter Spike Blade LOD1");
@@ -151,6 +155,12 @@ namespace Scatter.Rendering.Spike
             ApplyDrawSelection();
         }
 
+        public void SetBackend(SpikeBackend backend)
+        {
+            _config.Backend = backend;
+            ApplyDrawSelection();
+        }
+
         public void SetOffsetMode(SpikeRegionOffsetMode mode)
         {
             _config.OffsetMode = mode;
@@ -201,6 +211,12 @@ namespace Scatter.Rendering.Spike
             }
 
             Graphics.ExecuteCommandBuffer(_cmd);
+            if (_config.Backend == SpikeBackend.Indirect)
+            {
+                // BRG submits its draws itself in OnPerformCulling; the baseline queues them every frame.
+                _indirect.Submit(_worldBounds);
+            }
+
             if (readStats && !_readbackPending)
             {
                 _readbackPending = true;
@@ -262,16 +278,8 @@ namespace Scatter.Rendering.Spike
                 material.SetFloat(s_BladesPerInstance, k);
                 material.SetFloat(s_Indexed, type == SpikeDrawType.ProceduralIndexedIndirect ? 1f : 0f);
 
-                _brg.AddDraw(new SpikeBrgDraw
-                {
-                    Type = type,
-                    Material = _brg.RegisterMaterial(material),
-                    Mesh = type == SpikeDrawType.MeshIndirect ? _brg.RegisterMesh(_bladeMeshes[lod]) : default,
-                    IndexBuffer = type == SpikeDrawType.ProceduralIndexedIndirect ? _multiBladeIndexBuffers[lod].bufferHandle : default,
-                    Region = region,
-                    ArgsDraw = draw,
-                    CastShadows = true,
-                });
+                AddDraw(type, material, type == SpikeDrawType.MeshIndirect ? _bladeMeshes[lod] : null,
+                    type == SpikeDrawType.ProceduralIndexedIndirect ? _multiBladeIndexBuffers[lod] : null, region, draw);
             }
         }
 
@@ -280,13 +288,29 @@ namespace Scatter.Rendering.Spike
             Mesh mesh = resources.ObjectMesh;
             _drawDescriptors[ObjectDraw] = new SpikeDrawDescriptor(ObjectRegion, SpikeDrawType.MeshIndirect, (int)mesh.GetIndexCount(0), 1);
             Material material = CreateMaterial(resources.ObjectShader, ObjectDraw, _objects, ObjectRegion);
+            AddDraw(SpikeDrawType.MeshIndirect, material, mesh, null, ObjectRegion, ObjectDraw);
+        }
+
+        /// <summary>Adds the same draw to both backends: draw indices match <see cref="GetDrawIndex"/> in both.</summary>
+        private void AddDraw(SpikeDrawType type, Material material, Mesh mesh, GraphicsBuffer indexBuffer, int region, int draw)
+        {
             _brg.AddDraw(new SpikeBrgDraw
             {
-                Type = SpikeDrawType.MeshIndirect,
+                Type = type,
                 Material = _brg.RegisterMaterial(material),
-                Mesh = _brg.RegisterMesh(mesh),
-                Region = ObjectRegion,
-                ArgsDraw = ObjectDraw,
+                Mesh = mesh != null ? _brg.RegisterMesh(mesh) : default,
+                IndexBuffer = indexBuffer != null ? indexBuffer.bufferHandle : default,
+                Region = region,
+                ArgsDraw = draw,
+                CastShadows = true,
+            });
+            _indirect.AddDraw(new SpikeIndirectDraw
+            {
+                Type = type,
+                Material = material,
+                Mesh = mesh,
+                IndexBuffer = indexBuffer,
+                ArgsDraw = draw,
                 CastShadows = true,
             });
         }
@@ -304,14 +328,15 @@ namespace Scatter.Rendering.Spike
 
         private void ApplyDrawSelection()
         {
-            for (int lod = 0; lod < LodCount; lod++)
+            bool brg = _config.Backend == SpikeBackend.Brg;
+            for (int draw = 0; draw < DrawCount; draw++)
             {
-                _brg.SetDrawEnabled(GetDrawIndex(SpikeDrawType.MeshIndirect, lod), _config.BladeDrawType == SpikeDrawType.MeshIndirect);
-                _brg.SetDrawEnabled(GetDrawIndex(SpikeDrawType.ProceduralIndirect, lod), _config.BladeDrawType == SpikeDrawType.ProceduralIndirect);
-                _brg.SetDrawEnabled(GetDrawIndex(SpikeDrawType.ProceduralIndexedIndirect, lod), _config.BladeDrawType == SpikeDrawType.ProceduralIndexedIndirect);
+                bool selected = draw == ObjectDraw
+                    ? _config.ObjectsEnabled
+                    : _drawDescriptors[draw].DrawType == (uint)_config.BladeDrawType;
+                _brg.SetDrawEnabled(draw, selected && brg);
+                _indirect.SetDrawEnabled(draw, selected && !brg);
             }
-
-            _brg.SetDrawEnabled(ObjectDraw, _config.ObjectsEnabled);
         }
 
         private void OnCountersRead(AsyncGPUReadbackRequest request)
