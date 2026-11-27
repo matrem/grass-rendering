@@ -16,7 +16,8 @@ namespace Scatter.Diagnostics
 
         private readonly StringBuilder _builder = new StringBuilder(1024);
 
-        public string Build(string header, in FrameStats stats, FrameTimeHistory history, in ScatterStageTimings timings, ScatterQuality quality, string tierName, ScatterCsvLogger recordingLogger)
+        /// <param name="statusText">Extra lines of the scatter driver (state, keys), shown after the tier; null for none.</param>
+        public string Build(string header, in FrameStats stats, FrameTimeHistory history, in ScatterStageTimings timings, ScatterQuality quality, string tierName, ScatterCsvLogger recordingLogger, string statusText = null)
         {
             float frameTargetMs = quality != null ? quality.FrameTimeTargetMs : 0f;
             float averageMs = history.AverageMs();
@@ -28,6 +29,11 @@ namespace Scatter.Diagnostics
             {
                 _builder.Append("  (frame target ");
                 AppendNumber(frameTargetMs).Append(" ms)");
+            }
+
+            if (!string.IsNullOrEmpty(statusText))
+            {
+                _builder.Append("\n\n").Append(statusText);
             }
 
             _builder.Append("\n\nFrame\n  FPS ");

@@ -6,7 +6,7 @@ This guide describes **what exists today** in the repository and how it works. I
 - The order of work and the progress are in the [implementation plan](GrassPrototype_Implementation.md).
 - The coding rules are in [CodingRules.md](CodingRules.md).
 
-Current state: **end of Phase 0** (project setup). The project contains the package skeleton, the debug tools that later phases will feed, the quality tiers, a bootstrap scene, the tests and the build script. No blade is drawn yet.
+Current state: **Phase 1 in progress** (spikes). On top of the Phase 0 skeleton (debug tools, quality tiers, bootstrap scene, tests, build script), the BRG draw spike draws millions of blades and small rocks with three draw command types (section 4.3). The spike code is replaced in Phase 2.
 
 ---
 
@@ -20,7 +20,9 @@ Current state: **end of Phase 0** (project setup). The project contains the pack
 | Prototype scene and fly camera | Done | `Assets/Scenes/Bootstrap.unity`, `Assets/Prototype` |
 | Tests and command-line runs | Done | `Tests/Editor`, `Tests/Runtime` |
 | Windows build script | Done | `Assets/Prototype/Editor/PrototypeBuild.cs` |
-| Generation, culling, BRG drawing, layers, terrain adapter, wind, interaction | Not started (Phases 1 to 8) | design 3 to 8 |
+| BRG draw spike (Phase 1, S1): spike cull, BRG backend, spike shaders, blade mesh factory | Done: three blade draw types and the rock layer drawn by BRG in all five passes | `Runtime/Rendering`, `Shaders/Spike`, `Assets/Scenes/Spike_Draw.unity` |
+| RenderMeshIndirect baseline (S2), timings (S3) | Not started | |
+| Generation, layers, terrain adapter, wind, interaction | Not started (Phases 2 to 8) | design 3 to 8 |
 
 ---
 
@@ -33,17 +35,22 @@ Packages/com.gaiagames.scatter/        The scatter system, as an embedded packag
   Runtime/                             Assembly Scatter.Runtime
     ScatterQuality.cs                  Settings of one quality tier
     ScatterShadowMode.cs               Off / Near / All
+    AssemblyInfo.cs                    Internals visible to the Edit Mode tests
     Diagnostics/                       Debug HUD, frame statistics, CSV logger
-    Ground/ Chunks/ Compute/           Empty for now (Phases 1 to 7)
-    Rendering/ Wind/ Interaction/
-  Shaders/                             Empty for now (Phase 1)
+    Rendering/BladeMeshFactory.cs      Blade mesh LODs and K-blade index buffers, built by code
+    Rendering/Spike/                   Phase 1 spike (namespace Scatter.Rendering.Spike), replaced in Phase 2
+      Resources/                       ScatterSpikeResources asset (shaders, rock mesh; found in players too)
+    Ground/ Chunks/ Compute/           Empty for now (Phases 2 to 7)
+    Wind/ Interaction/
+  Shaders/Spike/                       Spike cull compute, spike shaders and their HLSL includes
   Editor/                              Assembly Scatter.Editor: menu items
   Tests/Editor/                        Assembly Scatter.Tests: Edit Mode tests
   Tests/Runtime/                       Assembly Scatter.Tests.PlayMode: Play Mode tests
 Assets/
   Prototype/                           Assembly Prototype: FlyCamera
-  Prototype/Editor/                    Assembly Prototype.Editor: PrototypeBuild
-  Scenes/Bootstrap.unity               The only scene in the build
+  Prototype/Editor/                    Assembly Prototype.Editor: PrototypeBuild, SpikeSceneBuilder
+  Scenes/Bootstrap.unity               First scene of the build
+  Scenes/Spike_Draw.unity              Phase 1 BRG draw spike, second scene of the build
   Settings/                            URP assets (PC_RPAsset, PC_Renderer), volume profiles
   Settings/Scatter/                    ScatterQuality_RTX3060Ti, ScatterQuality_RTX5070Ti
 Docs/                                  Design, implementation plan, this guide, coding rules
@@ -84,9 +91,9 @@ An arrow "A → B" means "B references A".
 
 | Assembly | Platforms | Role |
 |---|---|---|
-| `Scatter.Runtime` | all | The scatter system. References RP Core, URP and the Input System. |
+| `Scatter.Runtime` | all | The scatter system. References RP Core, URP and the Input System. Unsafe code allowed (BRG draw commands are native pointers). |
 | `Scatter.Editor` | Editor | Editor tools of the package. |
-| `Scatter.Tests` | Editor | Edit Mode tests. |
+| `Scatter.Tests` | Editor | Edit Mode tests. Unsafe code allowed (reads BRG draw commands); sees the internals of `Scatter.Runtime`. |
 | `Scatter.Tests.PlayMode` | all | Play Mode tests. |
 | `Prototype` | all | Prototype-only runtime code. |
 | `Prototype.Editor` | Editor | Prototype-only editor code (build script). |
@@ -102,7 +109,7 @@ Settings worth knowing:
 ## 4. How it works
 
 ### 4.1 Target pipeline
-The scatter system runs in two stages (design 3): **generation** of blade records on the GPU when a chunk needs them, and every frame a **cull compute** that fills a visible list and draw arguments, followed by a fixed set of **indirect draws**. None of it exists yet; Phase 1 proves the drawing path (design 6.3).
+The scatter system runs in two stages (design 3): **generation** of blade records on the GPU when a chunk needs them, and every frame a **cull compute** that fills a visible list and draw arguments, followed by a fixed set of **indirect draws**. Generation does not exist yet; the Phase 1 spike (4.3) proves the cull and drawing path (design 6.2, 6.3).
 
 ### 4.2 Diagnostics, every frame
 `ScatterDebugHud` is the only per-frame component today. It drives sampling, recording and display:
@@ -136,6 +143,39 @@ Allocation rules applied here: sampling and recording never allocate (checked by
 
 **UI:** the HUD is a UI Toolkit `Label` drawn by a **Panel Renderer** (the replacement for UI Document in Unity 6000.6), with `ScatterHudPanelSettings` and the `ScatterHudTheme` theme. Panel Renderer does not expose its root element publicly: the HUD registers `RegisterUIReloadCallback`, which Unity calls at once when the panel is already loaded and again after each reload; the HUD then attaches its label to the root.
 
+A scatter driver can also show its own lines (state, keys) under the tier with `ScatterDebugHud.StatusText`. The driver sets the string only when something changes or at the stats rate, while the HUD is visible.
+
+### 4.3 BRG draw spike (Phase 1)
+Spike code, replaced in Phase 2: it answers the questions of design 6.3 (does BRG indirect work with our own buffers, which draw command type for each usage). Namespace `Scatter.Rendering.Spike`.
+
+```mermaid
+flowchart TB
+    S["ScatterSpike.LateUpdate<br/>keys, HUD"] --> T["ScatterSpikeSystem.Tick"]
+    T --> R["SpikeCuller.RecordReset<br/>region counters = 0"]
+    R --> C1["SpikeCuller.RecordCull, blades<br/>frustum, LOD0 or LOD1 by distance"]
+    C1 --> C2["SpikeCuller.RecordCull, objects"]
+    C2 --> F["SpikeCuller.RecordFinalize<br/>draw arguments, K padding"]
+    F --> VIS[("Visible list<br/>regions: blade LOD0, blade LOD1, objects")]
+    F --> ARGS[("Draw arguments<br/>one entry per draw")]
+    B["SpikeBrgRenderer.OnPerformCulling<br/>camera and shadow views"] --> D["Indirect draws<br/>visibleOffset = region start"]
+    VIS --> D
+    ARGS --> D
+    INST[("Instance buffers<br/>xyz position, yaw")] --> D
+```
+
+| Class | Role |
+|---|---|
+| `ScatterSpike` | MonoBehaviour driver of the scene `Spike_Draw`: settings, keys (5.3), HUD status and timings. Runs the system in `LateUpdate`, after the camera moved. |
+| `ScatterSpikeSystem` | Owns everything below; creates the content at startup (4M blades, 16k rocks), the materials and the 7 BRG draws (3 blade draw types x 2 LODs, plus the rocks). `Tick` culls for one camera and requests the debug counters (non-blocking readback). |
+| `SpikeCuller` | Visible list (raw buffer, 4-byte indices) with its regions, region counters, draw arguments. Records the kernels of `SpikeCull.compute`: placement (R2 sequence), counter reset, cull (one atomic add per thread group and LOD, overflow guard), args finalize. |
+| `SpikeBrgRenderer` | The `BatchRendererGroup`: one batch with no metadata; in `OnPerformCulling` writes the enabled draws (mesh indirect or procedural indirect) for the camera, and the shadow casters for every shadow split. Regions are addressed with `visibleOffset`. |
+| `BladeMeshFactory` | Blade mesh LODs (3 segments = 7 vertices, 2 = 5, 1 = 3) and the index buffer drawing K blades per instance. Kept for Phase 2. |
+| `ScatterSpikeResources` | ScriptableObject with the spike shaders and the rock mesh, in the package `Resources` folder. |
+
+Blade draw types (`SpikeDrawType`): **mesh indirect** (one blade mesh instance per blade), **procedural indirect** (no mesh, the blade is built from `SV_VertexID`), **procedural indexed indirect** (K blades per instance through an index buffer; the shader reads the K entries from the visible list).
+
+Shaders (`Shaders/Spike`): `SpikeBladeMesh`, `SpikeBladeProcedural`, `SpikeObject`, each with the five passes of design 8.1. Shared code: `SpikePasses.hlsl` (the passes), `SpikeBladeInput.hlsl` and `SpikeObjectInput.hlsl` (vertex input and placement), `SpikeVisibleEntry.hlsl` (reads the visible list: through BRG with `DOTS_INSTANCING_ON`, through its own buffer otherwise), `SpikeCommon.hlsl` and `SpikeDrawDescriptor.hlsl` (constants and structs mirrored in C#).
+
 ---
 
 ## 5. Debug tools
@@ -160,9 +200,22 @@ Component settings: quality asset per Unity quality level, history length (300 f
 - Location: `Application.persistentDataPath/ScatterLogs/frames_<yyyyMMdd_HHmmss>.csv`. On Windows: `%USERPROFILE%\AppData\LocalLow\GaiaGames\GrassRendering\ScatterLogs`. The Unity console logs the full path.
 - One row per frame. Columns: `frame`, `frameTimeMs`, `cpuFrameMs`, `cpuMainThreadMs`, `cpuRenderThreadMs`, `gpuFrameMs`, `gcAllocatedInFrameBytes`, `scatterCpuMainMs`, `generationGpuMs`, `cullGpuMs`, `depthGpuMs`, `colourGpuMs`, `shadowsGpuMs`, `motionVectorsGpuMs`. Empty cells mean "not measured".
 
-### 5.3 Limits
+### 5.3 Spike controls (scene `Spike_Draw`)
+The spike shows its state under the HUD header, with the counters read back from the GPU (4 times per second, only while the HUD is visible): visible entries per region and entries skipped by overflow (red when > 0). The HUD timing rows show the spike CPU time and the GPU time of the cull compute.
+
+| Key | Action |
+|---|---|
+| F3 | Blade draw type: mesh indirect, procedural indirect, procedural indexed indirect |
+| F4 | Region offset mode: `visibleOffset` (works), window in bytes or entries (rejected by BRG on D3D12 and Vulkan: nothing drawn) |
+| F5 | Blade count: 256k, 1M, 2M, 4M |
+| F6 | K, blades per instance of the procedural indexed draws: 2 to 64 |
+| F7 | Object layer (rocks) on or off |
+| F8 | Debug view: colour per draw (red, green, blue for the three blade draw types; lighter for LOD1; rocks white). Global shader value `_ScatterDebugView` (design 12.2). |
+
+### 5.4 Limits
 - **GC allocated in frame** is not available in release players (shown as "-"). Check it in the Editor or in a development build.
 - **CPU and GPU times** need Player Settings "Frame Timing Stats" (enabled in this project).
+- **Frame Debugger:** BRG draws are listed as "Hybrid Batch Group"; the spike shader shows in the Shader section of the event, and vertex and index counts show 0 because they are in the GPU draw arguments.
 
 ---
 
@@ -187,7 +240,9 @@ Both quality levels use the URP asset `PC_RPAsset` for now. All values are start
 
 ## 7. Prototype content
 
-**Scene `Assets/Scenes/Bootstrap.unity`**: camera with `FlyCamera`, directional light, ground plane, debug HUD (with both quality assets). It is the only scene in the build.
+**Scene `Assets/Scenes/Bootstrap.unity`**: camera with `FlyCamera`, directional light, ground plane, debug HUD (with both quality assets). First scene of the build.
+
+**Scene `Assets/Scenes/Spike_Draw.unity`** (Phase 1): a copy of Bootstrap with a 150 m ground and the `ScatterSpike` driver (4.3, keys in 5.3). Second scene of the build. Created again, with the spike resources asset and the BRG variants setting, by **Scatter Prototype > Create Spike Content** (`Prototype.Editor.SpikeSceneBuilder`, also from the command line with `-executeMethod Prototype.Editor.SpikeSceneBuilder.CreateSpikeContent`).
 
 **`FlyCamera`** (Input System):
 
@@ -211,6 +266,7 @@ Both quality levels use the URP asset `PC_RPAsset` for now. All values are start
 | Windows graphics APIs | Direct3D 12, then Vulkan | Compute shaders and indirect draws |
 | Frame Timing Stats | On | CPU and GPU times in players (HUD) |
 | Strict shader variant matching | On | In players, a missing shader variant draws with the error shader (magenta) and logs the shader and keywords, instead of silently using the closest variant. Makes stripped variants (for example the BRG variants) visible at once. |
+| Graphics Settings > BatchRendererGroup Variants | Keep All (`m_BrgStripping: 2`) | The default strips the `DOTS_INSTANCING_ON` variants BRG draws with when Entities Graphics is not installed (Phase 1 finding). Set by **Scatter Prototype > Create Spike Content**. |
 | Active input handling | Input System only | The HUD also supports the legacy Input Manager |
 | Incremental GC | On | Shorter GC pauses |
 | Enter Play Mode | Without domain reload | Fast iteration. Static fields are **not** reset between plays: reset them explicitly. |
@@ -222,8 +278,8 @@ Both quality levels use the URP asset `PC_RPAsset` for now. All values are start
 
 | Assembly | Mode | Tests |
 |---|---|---|
-| `Scatter.Tests` | Edit Mode | `FrameTimeHistoryTests` (nearest-rank percentile, few samples, wrap-around past capacity, no allocation), `ScatterCsvLoggerTests` (header and rows, `NaN` written as an empty cell, dot decimal under a comma-decimal culture, dropped rows, no allocation), `FrameStatsSamplerTests` (no allocation), `ScatterHudTextTests` (values over the tier target in red, `NaN` shown as `-`, GC allocation `-` / `0 B` / red), `ScatterQualityTests` (quality level clamped to the tier list, no tiers gives null) |
-| `Scatter.Tests.PlayMode` | Play Mode | `ScatterDebugHudTests` (samples frames; label attached by the Panel Renderer, whether the panel loads before or after the HUD; label attached again after disable and enable; `Visible` hides the label; CSV written by `StopRecording` and when the HUD is disabled while recording, header and one row per frame; the test deletes the file) |
+| `Scatter.Tests` | Edit Mode | `FrameTimeHistoryTests` (nearest-rank percentile, few samples, wrap-around past capacity, no allocation), `ScatterCsvLoggerTests` (header and rows, `NaN` written as an empty cell, dot decimal under a comma-decimal culture, dropped rows, no allocation), `FrameStatsSamplerTests` (no allocation), `ScatterHudTextTests` (values over the tier target in red, `NaN` shown as `-`, GC allocation `-` / `0 B` / red, driver status lines after the tier), `ScatterQualityTests` (quality level clamped to the tier list, no tiers gives null), `BladeMeshFactoryTests` (vertex and index counts per LOD, same winding for every triangle, multi-blade index offsets), `SpikeCullerTests` (GPU: thread group size and descriptor size match HLSL, region capacities, cull vs a C# reference per region, counter reset, overflow counted and never past the region, K padding, placement deterministic and even for any prefix, no allocation), `SpikeBrgRendererTests` (commands per view: camera, shadow splits, other views; region offset modes; index buffer of K-blade draws; no allocation), `ScatterSpikeSystemTests` (all regions filled, settings changes, `Tick` does not allocate, with and without the stats readback) |
+| `Scatter.Tests.PlayMode` | Play Mode | `ScatterDebugHudTests` (samples frames; label attached by the Panel Renderer, whether the panel loads before or after the HUD; label attached again after disable and enable; `Visible` hides the label; CSV written by `StopRecording` and when the HUD is disabled while recording, header and one row per frame; the test deletes the file), `SpikeRenderTests` (renders the spike to a render texture for each blade draw type: every region drawn, checked by the debug view colours, lit blades drawn, no error shader; the window offset draws nothing on raw-buffer APIs. The image of each case is saved under `temporaryCachePath/SpikeRenderTests`) |
 
 Conventions:
 - Every per-frame entry point has an allocation test: `Assert.That(() => ..., Is.Not.AllocatingGCMemory())`. With Test Framework 1.8 it needs `using UnityEngine.TestTools.Constraints;` and the alias `using Is = UnityEngine.TestTools.Constraints.Is;`.
@@ -252,7 +308,7 @@ How to run them: **Window > General > Test Runner** in the Editor (**Run all in 
 
 ## 11. Known issues
 
-- The player log reports `Hidden/Universal Render Pipeline/DBufferClear shader is not supported` at startup (URP template content; decals are not used). To check in Phase 8.
+- The player log reports `Hidden/Universal Render Pipeline/DBufferClear shader is not supported` at startup (URP template content; decals are not used). To check in Phase 8.
 
 ---
 

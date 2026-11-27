@@ -1,0 +1,194 @@
+// Phase 1 spike: placement of test instances, per-instance cull into a visible list with regions,
+// and draw arguments for every draw type (Implementation Phase 1, design 6.2 and 6.3).
+// Driven by SpikeCuller.cs. The real cull of Phase 2 works per cluster, not per instance.
+
+#pragma kernel PlaceSpikeInstances
+#pragma kernel ResetSpikeCounters
+#pragma kernel CullSpikeInstances
+#pragma kernel FinalizeSpikeArgs
+
+#include "SpikeCommon.hlsl"
+#include "SpikeDrawDescriptor.hlsl"
+
+// R2 sequence (M. Roberts, 2018) in 32-bit fixed point: frac(i * alpha) is exact with wrapping uint maths,
+// where float maths would lose the fraction for millions of instances. Any prefix is evenly spread.
+#define SPIKE_R2_ALPHA_X 3242174889u // 0.7548776662 * 2^32
+#define SPIKE_R2_ALPHA_Y 2447445413u // 0.5698402910 * 2^32
+#define SPIKE_HALF_FIXED 2147483648u // 0.5 * 2^32
+#define SPIKE_TWO_PI 6.28318530718
+
+// Instances: xyz = world position, w = yaw (radians).
+RWStructuredBuffer<float4> _SpikeInstancesOut;
+StructuredBuffer<float4> _SpikeInstances;
+uint _SpikeInstanceCount;
+uint _SpikeDispatchWidthGroups;
+
+// Placement.
+float4 _SpikePlacementArea; // xy = origin XZ, zw = size XZ (meters).
+uint _SpikePlacementSeed;
+
+// Regions of the visible list: x = first entry, y = capacity (entries).
+StructuredBuffer<uint2> _SpikeRegions;
+// Per region: entries requested this frame (may exceed the capacity). Last element: entries skipped by overflow.
+RWStructuredBuffer<uint> _SpikeCounters;
+uint _SpikeCounterCount;
+uint _SpikeOverflowCounter;
+// Visible list: 4-byte instance indices.
+RWByteAddressBuffer _SpikeVisibleList;
+
+// Cull view and layer.
+float4 _SpikeFrustumPlanes[6]; // xyz = inward normal, w = distance (UnityEngine.Plane).
+float4 _SpikeCameraPosition;   // xyz.
+float _SpikeLod1DistanceMeters;
+float _SpikeMaxDistanceMeters;
+float _SpikeBoundingRadiusMeters;
+uint _SpikeLod0Region;
+uint _SpikeLod1Region;
+
+// Draw arguments.
+StructuredBuffer<SpikeDrawDescriptor> _SpikeDraws;
+RWStructuredBuffer<uint> _SpikeArgs;
+uint _SpikeDrawCount;
+
+groupshared uint gs_LodCount[2];
+groupshared uint gs_LodBase[2];
+
+uint GetInstanceIndex(uint3 groupId, uint groupIndex)
+{
+    // 2D dispatch: millions of instances exceed the 65535 groups allowed in one dimension.
+    return (groupId.y * _SpikeDispatchWidthGroups + groupId.x) * SPIKE_THREAD_GROUP_SIZE + groupIndex;
+}
+
+[numthreads(SPIKE_THREAD_GROUP_SIZE, 1, 1)]
+void PlaceSpikeInstances(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
+{
+    uint index = GetInstanceIndex(groupId, groupIndex);
+    if (index >= _SpikeInstanceCount)
+    {
+        return;
+    }
+
+    uint2 fixedUv = uint2(index * SPIKE_R2_ALPHA_X, index * SPIKE_R2_ALPHA_Y) + SPIKE_HALF_FIXED;
+    float2 uv = float2(fixedUv) * (1.0 / 4294967296.0);
+    float2 positionXZ = _SpikePlacementArea.xy + uv * _SpikePlacementArea.zw;
+    float yaw = SpikeHashToUnit(SpikeHash(index ^ _SpikePlacementSeed)) * SPIKE_TWO_PI;
+    _SpikeInstancesOut[index] = float4(positionXZ.x, 0.0, positionXZ.y, yaw);
+}
+
+[numthreads(SPIKE_THREAD_GROUP_SIZE, 1, 1)]
+void ResetSpikeCounters(uint3 dispatchId : SV_DispatchThreadID)
+{
+    if (dispatchId.x < _SpikeCounterCount)
+    {
+        _SpikeCounters[dispatchId.x] = 0;
+    }
+}
+
+bool IsInFrustum(float3 position, float radius)
+{
+    [unroll]
+    for (uint i = 0; i < 6; i++)
+    {
+        if (dot(_SpikeFrustumPlanes[i].xyz, position) + _SpikeFrustumPlanes[i].w < -radius)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+[numthreads(SPIKE_THREAD_GROUP_SIZE, 1, 1)]
+void CullSpikeInstances(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
+{
+    if (groupIndex < 2)
+    {
+        gs_LodCount[groupIndex] = 0;
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    // 1. Each visible instance takes a slot in its LOD within the group.
+    uint index = GetInstanceIndex(groupId, groupIndex);
+    int lod = -1;
+    uint slotInGroup = 0;
+    if (index < _SpikeInstanceCount)
+    {
+        float3 position = _SpikeInstances[index].xyz;
+        float distanceMeters = distance(position, _SpikeCameraPosition.xyz);
+        if (distanceMeters < _SpikeMaxDistanceMeters && IsInFrustum(position, _SpikeBoundingRadiusMeters))
+        {
+            lod = distanceMeters < _SpikeLod1DistanceMeters ? 0 : 1;
+            InterlockedAdd(gs_LodCount[lod], 1u, slotInGroup);
+        }
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    // 2. One atomic add per group and LOD reserves the entries in the region (design 6.2 step 3).
+    if (groupIndex < 2)
+    {
+        uint count = gs_LodCount[groupIndex];
+        uint base = 0;
+        if (count > 0)
+        {
+            uint region = groupIndex == 0 ? _SpikeLod0Region : _SpikeLod1Region;
+            InterlockedAdd(_SpikeCounters[region], count, base);
+        }
+
+        gs_LodBase[groupIndex] = base;
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (lod < 0)
+    {
+        return;
+    }
+
+    // 3. Write the index, or count it as skipped when the region is full (never a buffer overrun).
+    uint2 region = _SpikeRegions[lod == 0 ? _SpikeLod0Region : _SpikeLod1Region];
+    uint slot = gs_LodBase[lod] + slotInGroup;
+    if (slot < region.y)
+    {
+        _SpikeVisibleList.Store((region.x + slot) << 2, index);
+    }
+    else
+    {
+        InterlockedAdd(_SpikeCounters[_SpikeOverflowCounter], 1u);
+    }
+}
+
+// One thread per draw: instance count from the region counter, then padding for K blades per instance.
+[numthreads(SPIKE_THREAD_GROUP_SIZE, 1, 1)]
+void FinalizeSpikeArgs(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint drawIndex = dispatchId.x;
+    if (drawIndex >= _SpikeDrawCount)
+    {
+        return;
+    }
+
+    SpikeDrawDescriptor draw = _SpikeDraws[drawIndex];
+    uint2 region = _SpikeRegions[draw.region];
+    uint bladeCount = min(_SpikeCounters[draw.region], region.y);
+    uint instanceCount = bladeCount;
+    if (draw.drawType == SPIKE_DRAW_PROCEDURAL_INDEXED_INDIRECT)
+    {
+        uint k = max(draw.bladesPerInstance, 1u);
+        instanceCount = (bladeCount + k - 1u) / k;
+
+        // Region capacities are multiples of the largest K, so the padding stays inside the region.
+        for (uint entry = bladeCount; entry < instanceCount * k; entry++)
+        {
+            _SpikeVisibleList.Store((region.x + entry) << 2, SPIKE_EMPTY_ENTRY);
+        }
+    }
+
+    uint first = drawIndex * SPIKE_ARGS_UINTS_PER_DRAW;
+    _SpikeArgs[first + 0] = draw.elementsPerInstance; // index or vertex count per instance
+    _SpikeArgs[first + 1] = instanceCount;
+    _SpikeArgs[first + 2] = 0;                        // start index or start vertex
+    _SpikeArgs[first + 3] = 0;                        // base vertex or start instance
+    _SpikeArgs[first + 4] = 0;                        // start instance (indexed only)
+}
