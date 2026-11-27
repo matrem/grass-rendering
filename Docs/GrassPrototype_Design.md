@@ -526,6 +526,7 @@ References without a link are from memory: verify exact titles before quoting th
 | Item | Resolved by |
 |---|---|
 | BRG indirect with a custom per-instance buffer read through the BRG index in URP shaders | Spike S1 (Implementation Phase 1) |
+| Draw command type per usage: mesh indirect or procedural indirect (K blades per instance) for Blade layers; mesh indirect for Object layers | Spikes S1 to S3 (Implementation Phase 1) |
 | Does the production terrain render its finest LOD within ~200 m? | Adapter checker on the production adapter (4.4) |
 | Is DLSS available in URP for the project's Unity version? | Check the Unity release notes |
 | Budget figures (10.1) | Phase 9 measurements |

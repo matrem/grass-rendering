@@ -8,7 +8,7 @@ Phases are ordered so the riskiest parts are proven first. Each phase ends with 
 | Phase | Status |
 |---|---|
 | 0 - Project setup | Done |
-| 1 - Spikes | Not started |
+| 1 - Spikes | In progress |
 | 2 - Core pipeline on a flat ground | Not started |
 | 3 - Layers | Not started |
 | 4 - Terrain adapter and streaming | Not started |
@@ -60,15 +60,27 @@ How this document is kept up to date (in the same commit as the code):
 ---
 
 ## Phase 1 - Spikes (prove the risky rendering path)
-**Goal:** confirm that the draw path of design section 6.3 works before building on it.
+**Goal:** confirm that the draw path of design section 6.3 works before building on it, and choose the draw command type for each usage.
 
-- [ ] **S1 - BRG indirect:** one compute shader writes a visible-index buffer and indirect args for 1M instances of a simple blade; a `BatchRendererGroup` draws them with `BatchDrawCommandIndirect` (visible instances buffer + args buffer). The URP shader reads per-instance data from a custom StructuredBuffer using the index BRG provides.
-  Check: two (layer, LOD) regions in one visible buffer via `visibleInstancesBufferWindowOffset`; shadow caster, DepthOnly and DepthNormals passes work; no per-instance BRG metadata needed.
-- [ ] **S2 - RenderMeshIndirect:** same content with `Graphics.RenderMeshIndirect`.
-- [ ] **S3 - Timing:** GPU timestamps around the compute and the draws in both paths.
+Only the indirect command types are candidates: the instance count is decided on the GPU and never read back (design 10.2), so the direct `BatchDrawCommand` and `BatchDrawCommandProcedural` are excluded. Usages to decide:
+
+| Usage | Candidates |
+|---|---|
+| Blade layers (grass, flowers, moss): millions of blades of 3 to 7 vertices | Mesh indirect, 1 blade per instance; procedural indirect, 1 blade per instance; procedural indirect indexed, K blades per instance |
+| Object layers (small rocks, bushes): fewer instances, meshes of a few hundred vertices | Mesh indirect |
+| Shadow, depth and motion-vector passes | The command of the colour pass, sent again for each view |
+
+Spike content: 1M blades on a flat grid, per-blade data (position, yaw) in a custom StructuredBuffer filled at startup. One spike cull compute per frame resets the args, picks LOD0 or LOD1 per blade by distance, reserves entries with an atomic add (with a region overflow guard) and writes 4-byte indices into **one visible list with two regions** (LOD0, LOD1).
+
+- [ ] **S1 - BRG:** a `BatchRendererGroup` draws the spike content three ways: mesh indirect (`BatchDrawCommandIndirect`), procedural indirect with 1 blade per instance, procedural indirect indexed with K blades per instance (blade index from `SV_VertexID`). Plus one Object layer (a simple imported mesh) drawn with mesh indirect. The hand-written URP shader reads the blade data from the custom StructuredBuffer through the visible list.
+  Check, for each variant: the two regions are read through `visibleInstancesBufferWindowOffset` (or the shader's own offset for procedural); `UniversalForward`, `ShadowCaster` (shadow cascades with the split visibility mask), `DepthOnly`, `DepthNormals` (SSAO and depth priming on) and `MotionVectors` passes work; whether per-instance BRG metadata or the DOTS instancing variant is needed.
+- [ ] **S2 - Baseline:** the same Blade variants with `Graphics.RenderMeshIndirect` and `Graphics.RenderPrimitivesIndexedIndirect`, same compute output.
+- [ ] **S3 - Timing:** GPU time of the cull compute and of the draws, per variant and per backend, at the same blade count, on the RTX 3060 Ti; sweep of K for the procedural indexed variant.
 - [ ] Graphics Settings: check that "BatchRendererGroup Variants" keeps the DOTS instancing variants in players (the default strips them when Entities Graphics is not installed); check in a Windows build.
+- [ ] Debug: HUD cull and colour timing rows fed by the spike; keys to switch backend, draw variant and blade count.
+- [ ] Tests: cull compute vs a C# reference (region counts and offsets, args reset, overflow guard); no allocation in the per-frame entry points (dispatch submission, `OnPerformCulling`); Play Mode render of each backend and variant to a render texture, in the Editor and in a Windows player: blade pixels present, no error shader.
 
-**Exit:** a short findings note: what works, any API limitation, and confirmation of BRG as main path (or fallback to RenderMeshIndirect). **Stop and review before Phase 2.**
+**Exit:** a findings note: what works, any API limitation, and a decision table (usage, command type, backend, K) confirming BRG as main path (or fallback to RenderMeshIndirect). If Blade layers become procedural, the change to design 6.3, Phase 2 item 1 and the 16.1 row is presented at the review. **Stop and review before Phase 2.**
 
 ---
 
