@@ -1,0 +1,22 @@
+{
+  "name": "Prototype.Editor",
+  "rootNamespace": "Prototype.Editor",
+  "references": [
+    "Prototype",
+    "Scatter.Runtime",
+    "Scatter.Editor",
+    "Unity.RenderPipelines.Core.Runtime",
+    "Unity.RenderPipelines.Universal.Runtime"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

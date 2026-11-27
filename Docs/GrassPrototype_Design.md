@@ -4,7 +4,7 @@
 |---|---|
 | Engine | Unity 6.6 (6000.6.10f1), URP 17.6, **Forward+** renderer |
 | Platform | Desktop PC, DX12 (Vulkan checked), compute shaders required |
-| GPUs | Test: RTX 3060. Target: RTX 5070 Ti. Reference resolution 1440p |
+| GPUs | Test: RTX 3060 Ti. Target: RTX 5070 Ti. Reference resolution 1440p |
 | Purpose | Validate a GPU-driven procedural scatter system (grass, flowers, moss, small rocks, bushes) on terrain and meshes, with wind, player interaction and shadows, usable in a streamed open world. Measure it to choose the production architecture. |
 
 ---
@@ -13,7 +13,7 @@
 
 | ID | Goal |
 |---|---|
-| G1 | **Performance in a real open world.** RTX 3060: whole frame >= 60 FPS, scatter GPU time <= 3 ms. RTX 5070 Ti: whole frame >= 90-120 FPS, scatter GPU time <= 2 ms. Quality tiers scale between the two. |
+| G1 | **Performance in a real open world.** RTX 3060 Ti: whole frame >= 60 FPS, scatter GPU time <= 2.5 ms. RTX 5070 Ti: whole frame >= 90-120 FPS, scatter GPU time <= 2 ms. Quality tiers scale between the two. |
 | G2 | **One pipeline for terrain and meshes.** They differ only in how candidate points are produced. |
 | G3 | **Animation and interaction.** Wind with gusts, per-blade variation, bending/flattening by the player and objects, with recovery. |
 | G4 | **BatchRendererGroup (BRG) rendering**, with `Graphics.RenderMeshIndirect` as a simpler baseline for comparison. |
@@ -71,7 +71,7 @@ Terms are grouped by theme. The section in brackets gives the details.
 | **Cull compute** | Per-frame GPU pass deciding, per cluster, visibility, mesh LOD and blade count, and filling the visible list and draw arguments. (6.2) |
 | **Indirect draw** | A draw whose instance count is read from the draw arguments on the GPU, so the CPU never needs to know it. (6.3) |
 | **Interaction texture** | Top-down texture around the player storing how blades are pushed and flattened. (8.4) |
-| **Quality tier** | Set of settings (density, ranges, shadows) per GPU class: RTX 3060, RTX 5070 Ti. (1, 12) |
+| **Quality tier** | Set of settings (density, ranges, shadows) per GPU class: RTX 3060 Ti, RTX 5070 Ti. (1, 12) |
 | **Debug HUD** | On-screen panel of timings, blade counts, memory, streaming state and warnings, with debug views and controls. (12.1, 12.2) |
 
 Sizes (32 m, 8 m, ring distances) are tunable settings; the values above are starting points.
@@ -377,7 +377,7 @@ Per frame (about one third of stored blades visible, ~1.5-2M):
 | Vertex input | ~8 MB of indices + ~30 MB of blade records |
 | Generation | Only for new/closer chunks; a full chunk is ~200k candidate points, well under 0.1 ms |
 
-Reaching 3-5M visible blades means more layers or higher densities; this is what the stress scene measures. The dominant GPU cost is expected to be **rasterising many small triangles and shadow passes**, not the compute work; this is why far blades are fewer and wider, and shadows are limited per layer.
+Reaching 4-5M visible blades means more layers or higher densities; this is what the stress scene measures. The dominant GPU cost is expected to be **rasterising many small triangles and shadow passes**, not the compute work; this is why far blades are fewer and wider, and shadows are limited per layer.
 
 ### 10.2 Rules
 - No GPU readback in the steady-state frame (only exception: the non-blocking debug stats readback of 12.1).
@@ -397,14 +397,14 @@ Reaching 3-5M visible blades means more layers or higher densities; this is what
 All metrics are measured on the scripted camera paths (walk, run, fast fly) and logged in the CSV. Frame rates are judged on the **99th percentile** of frame time, not the average: an average hides stutter.
 
 **Speed**
-| Metric | RTX 3060 | RTX 5070 Ti |
+| Metric | RTX 3060 Ti | RTX 5070 Ti |
 |---|---|---|
 | Whole frame, 99th percentile (open-world load scene) | >= 60 FPS (<= 16.7 ms) | >= 90-120 FPS (<= 11.1-8.3 ms) |
-| Scatter GPU time (generation + cull + all passes) | <= 3 ms | <= 2 ms |
-| Generation GPU time in any single frame | <= 0.5 ms | <= 0.3 ms |
+| Scatter GPU time (generation + cull + all passes) | <= 2.5 ms | <= 2 ms |
+| Generation GPU time in any single frame | <= 0.4 ms | <= 0.3 ms |
 | CPU main thread for scatter | <= 0.5 ms | <= 0.5 ms |
 | CPU render thread for scatter (draw submission, measured in the Profiler) | <= 0.3 ms | <= 0.3 ms |
-| Visible blades in stress scene (reference) | >= 3M | >= 5M |
+| Visible blades in stress scene (reference) | >= 4M | >= 5M |
 
 **Stability** (no hitches, no growth over time)
 | Metric | Target (both tiers) |

@@ -1,0 +1,11 @@
+{
+  "name": "com.gaiagames.scatter",
+  "displayName": "GaiaGames GPU Scatter",
+  "version": "0.1.0",
+  "unity": "6000.6",
+  "description": "GPU-driven procedural scatter (grass, flowers, moss, small rocks, bushes) for URP Forward+, drawn with BatchRendererGroup indirect draws. No dependency on any terrain code: terrains connect through ITerrainAdapter.",
+  "dependencies": {
+    "com.unity.render-pipelines.universal": "17.6.0",
+    "com.unity.modules.uielements": "1.0.0"
+  }
+}

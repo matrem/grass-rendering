@@ -1,11 +1,12 @@
 # Copilot instructions - GrassRendering
 
-Unity 6.6 (6000.6.10f1) prototype of a GPU-driven procedural scatter system (grass, flowers, moss, small rocks, bushes) for URP Forward+, rendered with BatchRendererGroup indirect draws. Target PC GPUs: RTX 3060 (test), RTX 5070 Ti (target).
+Unity 6.6 (6000.6.10f1) prototype of a GPU-driven procedural scatter system (grass, flowers, moss, small rocks, bushes) for URP Forward+, rendered with BatchRendererGroup indirect draws. Target PC GPUs: RTX 3060 Ti (test), RTX 5070 Ti (target).
 
 ## Read first
-Before any work, read both documents:
+Before any work, read these documents:
 - `Docs/GrassPrototype_Design.md`: **what** is built and **why**. Source of truth for the architecture. Section 2 is the vocabulary; section 16 lists the decisions taken and the open items.
 - `Docs/GrassPrototype_Implementation.md`: **how** and **in which order**, phase by phase, with the progress table and checkboxes.
+- `Docs/ProjectGuide.md`: what **exists today** and how it works (code map, assemblies, debug tools, tests, settings).
 - `Docs/CodingRules.md`: coding rules (structure, naming, zero allocation per frame, GPU code). Follow them for every change; `.editorconfig` enforces formatting and naming.
 
 ## Workflow
@@ -14,11 +15,12 @@ Before any work, read both documents:
 - Keep the documents in sync **in the same change as the code**:
   - tick the item and update the phase status in the implementation plan;
   - record deviations and findings in a **Notes** list at the end of the phase;
-  - if a design decision changes, update the design section and its row in design 16.1. Do not reopen a 16.1 decision without new facts; ask the user first.
+  - if a design decision changes, update the design section and its row in design 16.1. Do not reopen a 16.1 decision without new facts; ask the user first;
+  - update `Docs/ProjectGuide.md` so it describes what exists (new or changed classes, assemblies, folders, settings, debug tools, tests), and the status line of `README.md` when a phase changes.
 - Use the vocabulary of design section 2 in code, comments and documents (chunk, cluster, ring, block, arena, rank, blade record...). Add new terms to the vocabulary.
 
 ## Code rules (summary of `Docs/CodingRules.md`)
-- The scatter system lives in the embedded package `Packages/com.<company>.scatter` and must not reference terrain code or anything in `Assets`. Prototype-only content (mock terrain, test scenes, player) stays in `Assets`.
+- The scatter system lives in the embedded package `Packages/com.gaiagames.scatter` and must not reference terrain code or anything in `Assets`. Prototype-only content (mock terrain, test scenes, player) stays in `Assets`.
 - **Zero managed allocation per frame** (no `new`, LINQ, strings, capturing lambdas, boxing in per-frame code). Every per-frame entry point has an `Is.Not.AllocatingGCMemory()` test.
 - No GPU readback in the frame (exceptions: tests, and the non-blocking debug stats readback of design 12.1).
 - No per-frame managed allocations; GPU buffers allocated at startup from the quality tier and released in `OnDisable`.

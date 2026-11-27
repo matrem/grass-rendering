@@ -7,8 +7,8 @@ Design section references (e.g. 12.1) point to `GrassPrototype_Design.md`.
 
 ## 1. Structure
 
-- **The package is the product.** Scatter code lives in `Packages/com.<company>.scatter` and never references `Assets` or terrain code. Prototype-only code (mock terrain, player, test scenes) lives in `Assets`.
-- **Namespaces follow folders:** `Scatter.Chunks`, `Scatter.Rendering`, `Scatter.Ground`... inside the assemblies of Phase 0 (`Scatter.Runtime`, `Scatter.Editor`, `Scatter.Tests`, `Prototype`).
+- **The package is the product.** Scatter code lives in `Packages/com.gaiagames.scatter` and never references `Assets` or terrain code. Prototype-only code (mock terrain, player, test scenes) lives in `Assets`.
+- **Namespaces follow folders:** `Scatter.Chunks`, `Scatter.Rendering`, `Scatter.Ground`, `Scatter.Diagnostics`... inside the assemblies of Phase 0 (`Scatter.Runtime`, `Scatter.Editor`, `Scatter.Tests`, `Scatter.Tests.PlayMode`, `Prototype`, `Prototype.Editor`). Never name a namespace `Debug`: it would hide `UnityEngine.Debug`.
 - **One type per file**, file name = type name.
 - **Thin MonoBehaviours.** A MonoBehaviour holds references and settings, and forwards to plain C# classes that do the work. Plain classes are testable in Edit Mode without a scene.
 - **One driver per frame.** A single `ScatterSystem` runs the per-frame work in a fixed order (CPU chunk update, uploads, cull dispatch, draw submission). No `Update()` scattered over many components.
@@ -82,3 +82,4 @@ How it is checked:
 - Unit tests pass (Edit Mode), including the no-allocation tests.
 - No new compiler warnings.
 - The implementation plan is updated (item ticked, notes), and the design if a decision changed (see `.github/copilot-instructions.md`).
+- `Docs/ProjectGuide.md` describes the change (classes, assemblies, folders, settings, debug tools, tests).
