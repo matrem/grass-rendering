@@ -51,9 +51,11 @@ namespace Scatter.Diagnostics
             AppendMs("\n  CPU main ", timings.CpuMainMs, quality != null ? quality.ScatterCpuMainBudgetMs : 0f);
             AppendMs("   generation ", timings.GenerationGpuMs, quality != null ? quality.GenerationGpuBudgetMs : 0f);
             AppendMs("   cull ", timings.CullGpuMs, 0f);
+            AppendMs("\n  camera ", timings.CameraGpuMs, 0f);
+            AppendMs("   shadows ", timings.ShadowsGpuMs, 0f);
+            AppendMs("   SSAO ", timings.SsaoGpuMs, 0f);
             AppendMs("\n  depth ", timings.DepthGpuMs, 0f);
             AppendMs("   colour ", timings.ColourGpuMs, 0f);
-            AppendMs("   shadows ", timings.ShadowsGpuMs, 0f);
             AppendMs("   motion vectors ", timings.MotionVectorsGpuMs, 0f);
 
             if (recordingLogger != null)

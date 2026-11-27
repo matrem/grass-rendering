@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -126,8 +127,14 @@ namespace Scatter.Rendering.Spike
         /// <summary>GPU time of the cull compute (reset, culls, args), a few frames late; 0 until measured.</summary>
         public float CullGpuMs => s_CullSampler.gpuElapsedTime;
 
-        /// <summary>CPU time of the last <see cref="Tick"/>, in milliseconds.</summary>
+        /// <summary>CPU time of the last <see cref="Tick"/> (cull recording, and draw submission for the Indirect backend), in milliseconds.</summary>
         public float TickCpuMs { get; private set; }
+
+        /// <summary>
+        /// CPU time of the draw submission, in milliseconds: the Graphics.Render*Indirect calls of the last
+        /// <see cref="Tick"/> (Indirect backend), or the BRG culling callbacks since the previous Tick (all views).
+        /// </summary>
+        public float SubmitCpuMs { get; private set; }
 
         /// <summary>
         /// Debug stats read back without blocking (design 12.1), a few frames late: requested entries per region,
@@ -161,6 +168,13 @@ namespace Scatter.Rendering.Spike
             ApplyDrawSelection();
         }
 
+        /// <summary>Off: no cull and no draw (baseline of the measurements); the buffers stay allocated.</summary>
+        public void SetScatterEnabled(bool enabled)
+        {
+            _config.ScatterEnabled = enabled;
+            ApplyDrawSelection();
+        }
+
         public void SetOffsetMode(SpikeRegionOffsetMode mode)
         {
             _config.OffsetMode = mode;
@@ -191,7 +205,15 @@ namespace Scatter.Rendering.Spike
         /// <summary>Per-frame work: cull for <paramref name="camera"/>, then BRG draws the result in every view.</summary>
         public void Tick(Camera camera, bool readStats)
         {
-            float startTime = Time.realtimeSinceStartup;
+            long startTicks = Stopwatch.GetTimestamp();
+            float brgCallbackMs = _brg.TakeCallbackCpuMs();
+            if (!_config.ScatterEnabled)
+            {
+                TickCpuMs = 0f;
+                SubmitCpuMs = 0f;
+                return;
+            }
+
             GeometryUtility.CalculateFrustumPlanes(camera, _frustumPlanes);
             _culler.SetView(camera.transform.position, _frustumPlanes);
 
@@ -214,7 +236,13 @@ namespace Scatter.Rendering.Spike
             if (_config.Backend == SpikeBackend.Indirect)
             {
                 // BRG submits its draws itself in OnPerformCulling; the baseline queues them every frame.
+                long submitTicks = Stopwatch.GetTimestamp();
                 _indirect.Submit(_worldBounds);
+                SubmitCpuMs = TicksToMs(Stopwatch.GetTimestamp() - submitTicks);
+            }
+            else
+            {
+                SubmitCpuMs = brgCallbackMs;
             }
 
             if (readStats && !_readbackPending)
@@ -223,7 +251,12 @@ namespace Scatter.Rendering.Spike
                 AsyncGPUReadback.RequestIntoNativeArray(ref _counterReadback, _culler.Counters, _onCountersRead);
             }
 
-            TickCpuMs = (Time.realtimeSinceStartup - startTime) * 1000f;
+            TickCpuMs = TicksToMs(Stopwatch.GetTimestamp() - startTicks);
+        }
+
+        internal static float TicksToMs(long ticks)
+        {
+            return (float)(ticks * 1000.0 / Stopwatch.Frequency);
         }
 
         public void Dispose()
@@ -331,9 +364,9 @@ namespace Scatter.Rendering.Spike
             bool brg = _config.Backend == SpikeBackend.Brg;
             for (int draw = 0; draw < DrawCount; draw++)
             {
-                bool selected = draw == ObjectDraw
+                bool selected = _config.ScatterEnabled && (draw == ObjectDraw
                     ? _config.ObjectsEnabled
-                    : _drawDescriptors[draw].DrawType == (uint)_config.BladeDrawType;
+                    : _drawDescriptors[draw].DrawType == (uint)_config.BladeDrawType);
                 _brg.SetDrawEnabled(draw, selected && brg);
                 _indirect.SetDrawEnabled(draw, selected && !brg);
             }

@@ -129,6 +129,7 @@ GameObject:
   m_Component:
   - component: {fileID: 373400072}
   - component: {fileID: 373400071}
+  - component: {fileID: 373400073}
   m_Layer: 0
   m_Name: Scatter Spike
   m_TagString: Untagged
@@ -163,12 +164,14 @@ MonoBehaviour:
   _bladeDrawType: 0
   _offsetMode: 0
   _bladesPerInstance: 16
+  _backend: 0
   _drawTypeKey: 96
   _offsetModeKey: 97
   _bladeCountKey: 98
   _bladesPerInstanceKey: 99
   _objectsKey: 100
   _debugViewKey: 101
+  _backendKey: 102
 --- !u!4 &373400072
 Transform:
   m_ObjectHideFlags: 0
@@ -184,6 +187,33 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &373400073
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 373400070}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 530599e12766ea64587e6426a429ec0a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Scatter.Runtime::Scatter.Rendering.Spike.SpikeBenchmark
+  _spike: {fileID: 373400071}
+  _hud: {fileID: 2018861910}
+  _viewPositions:
+  - {x: 0, y: 1.8, z: -60}
+  - {x: 0, y: 10, z: -70}
+  _viewEulerAngles:
+  - {x: 10, y: 0, z: 0}
+  - {x: 25, y: 0, z: 0}
+  _bladeCounts: 000010000000200000004000i
+  _defaultBladesPerInstance: 16
+  _bladesPerInstanceSweep: 020000000400000008000000100000002000000040000000i
+  _sweepBladeCount: 4194304
+  _warmupFrames: 60
+  _measureFrames: 300
+  _startKey: 103
 --- !u!1 &1475288281
 GameObject:
   m_ObjectHideFlags: 0

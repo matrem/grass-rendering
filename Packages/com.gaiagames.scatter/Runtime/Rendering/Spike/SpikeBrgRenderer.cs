@@ -26,6 +26,7 @@ namespace Scatter.Rendering.Spike
         private GraphicsBuffer _batchBuffer;
         private BatchID _batchID;
         private int _drawCount;
+        private long _callbackTicks;
 
         public SpikeBrgRenderer(SpikeCuller culler, Bounds worldBounds, int maxDrawCount)
         {
@@ -191,9 +192,19 @@ namespace Scatter.Rendering.Spike
             output[0] = default;
         }
 
+        /// <summary>CPU time spent in the culling callback (every view) since the previous call, in milliseconds; resets it.</summary>
+        public float TakeCallbackCpuMs()
+        {
+            float milliseconds = (float)(_callbackTicks * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
+            _callbackTicks = 0;
+            return milliseconds;
+        }
+
         private JobHandle OnPerformCulling(BatchRendererGroup rendererGroup, BatchCullingContext cullingContext, BatchCullingOutput cullingOutput, IntPtr userContext)
         {
+            long startTicks = System.Diagnostics.Stopwatch.GetTimestamp();
             WriteDrawCommands(cullingContext.viewType, cullingContext.cullingSplits.Length, cullingOutput.drawCommands);
+            _callbackTicks += System.Diagnostics.Stopwatch.GetTimestamp() - startTicks;
             return default;
         }
 

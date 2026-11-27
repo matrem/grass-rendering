@@ -42,7 +42,9 @@ Terms are grouped by theme. The section in brackets gives the details.
 | **Scatter profile** | Asset attached to a ground source: which layers it receives and which mask channel drives each. (4.3) |
 | **Density** | Fraction (0 to 1) of a layer's full blade count that is kept. Decreases with distance, following the layer's density curve. (5.2, 5.3) |
 | **Rank** | A fixed per-blade number in [0,1) deciding which blades are removed first when density decreases (lowest ranks are kept). (5.2) |
-| **Mesh LOD** | Simpler blade mesh used at distance (e.g. 7, 5, 3 vertices). Not to be confused with rings. (6.2, 7) |
+| **Mesh LOD** | Simpler blade geometry used at distance (e.g. 7, 5, 3 vertices): fewer segments of the blade template for Blade layers, a simpler mesh for Object layers. Not to be confused with rings. (6.2, 6.3, 7) |
+| **Blade template** | The blade shape of one mesh LOD (segments from root to tip), built in the vertex shader from `SV_VertexID`; no mesh. (6.3) |
+| **K (blades per instance)** | Number of blades one instance of a Blade layer draw covers, through an index buffer repeating the blade template K times. (6.3) |
 
 **Space**
 | Term | Definition |
@@ -294,14 +296,18 @@ The rank is not used as a random value: all clusters use the same point sequence
 Shadow casting uses the same visible list (only for the layers and LODs configured to cast). This misses shadows from blades just outside the camera frustum; acceptable for small near blades, and reduced by widening the frustum test for shadow-casting LODs (the extra off-screen blades cost only vertex work in the camera passes). Near casters are submitted only to the first shadow cascades (BRG split visibility mask), as they are too small to matter in far cascades.
 
 ### 6.3 Drawing
+- **Command types** (measured in Phase 1, S3: on 2.1M visible blades, 19% faster than one mesh instance per blade; a plateau from K = 16):
+  - **Blade layers:** procedural indexed indirect (`BatchDrawCommandProceduralIndirect` with an index buffer). No mesh: the vertex shader builds the blade template of the mesh LOD from `SV_VertexID`, and one instance draws **K = 16 blades** through an index buffer repeating the template K times. The cull rounds the instance count up and pads the region with an empty entry, which the vertex shader collapses.
+  - **Object layers:** mesh indirect (`BatchDrawCommandIndirect`), one mesh instance per object.
+  - Shadow, depth and motion-vector passes use the command of the colour pass, sent again for each view.
 - **BRG (main path):** one indirect draw command per (layer, LOD). Its `visibleInstancesBufferHandle` is the whole visible list and its `visibleOffset` the first entry of the region; its `indirectArgsBufferHandle` points to the args written by the cull. The visible instances window (`visibleInstancesBufferWindowOffset`) is not used: on D3D12 and Vulkan BRG works with raw buffers and rejects a window (Phase 1 finding). Per-instance BRG metadata is not used: the batch has an empty metadata list, and the shader reads the blade record from the arena with the index provided by BRG (`GetDOTSInstanceIndex`).
 - **BRG shader variants:** Graphics Settings "BatchRendererGroup Variants" is set to **Keep All**; the default strips the `DOTS_INSTANCING_ON` variants from players when Entities Graphics is not installed (Phase 1 finding).
-- **RenderMeshIndirect (baseline):** one `Graphics.RenderMeshIndirect` per (layer, LOD), arena and visible list bound through the material property block.
+- **Graphics.Render*Indirect (baseline):** one `Graphics.RenderPrimitivesIndexedIndirect` (Blade layers) or `Graphics.RenderMeshIndirect` (Object layers) per (layer, LOD), arena and visible list bound through the material. These calls address the draw arguments by command index (16 or 20 bytes), so the draws are 80 bytes apart in the arguments buffer. Measured 0.1 to 0.3 ms slower than BRG, same CPU cost.
 - Both use the same compute output, so they are compared on identical work.
 
 ### 6.4 Smooth transitions
 - **Density:** in the vertex shader, each blade shrinks to zero as its rank approaches `density(its own distance)`. Blades disappear by fading, not popping.
-- **Mesh LOD:** switch per cluster. Blade LOD meshes are designed to look identical at the switch distance; a dither band is added only if switching is visible.
+- **Mesh LOD:** switch per cluster. Blade LOD templates are designed to look identical at the switch distance; a dither band is added only if switching is visible.
 
 ---
 
@@ -309,7 +315,7 @@ Shadow casting uses the same visible list (only for the layers and LODs configur
 
 A `ScatterLayer` asset defines:
 - **Kind:** Blade (custom grass shader, wind, interaction) or Object (small rocks, bushes: URP Lit-based shader, no or little wind).
-- Mesh per LOD and material.
+- Per mesh LOD: the blade template (segment count, width and curve) for the Blade kind, a mesh for the Object kind; the material.
 - Density (blades per m^2 at full density) and density curve over distance; ring boundaries; scatter range.
 - Scale range, slope and altitude limits, alignment (ground normal or world up), random tint.
 - Wind weight, interaction weight.
@@ -439,6 +445,8 @@ An on-screen panel, part of the package, toggled at runtime. Values over a quali
 | Streaming | Chunks per state (resident, queued, generating, waiting for residency); generations this frame; `Changed` events this second; chunks in the first ring waiting for generation, and for how many frames |
 | Warnings | Clusters skipped by visible-list overflow (6.2); blocks downgraded or released because a pool is full (5.4); generation queue backlog |
 
+GPU timings come from profiler markers, so they exist in the Editor and in development players only (Phase 1 finding, checked with the GPU marker probe). Our own passes (generation, cull) are timed everywhere. Of URP's work, players time only the scopes URP records itself: the whole camera (`ExecuteRenderGraph`), the main light shadows (`MainLightShadow`) and SSAO; the Render Graph pass markers (depth, colour, motion vectors) have a GPU time in the Editor only, whatever the graphics threading mode. In players, depth + colour = camera - shadows - SSAO; a finer split needs PIX or Nsight Graphics. The probe (`-spikeTimingProbe` in the spike scene, Phase 1) lists what a build can time, to run again after a Unity upgrade.
+
 GPU counters (visible blades, overflows) are written by the cull into a small stats buffer and read with `AsyncGPUReadback`, a few frames late. This is the only readback allowed in a frame (10.2): it is non-blocking, debug-only, and off when the HUD and CSV logger are off.
 
 The **CSV logger** writes the same values every frame during scripted camera paths (Phase 9).
@@ -510,7 +518,7 @@ References without a link are from memory: verify exact titles before quoting th
 | Decision | Why | Section |
 |---|---|---|
 | URP Forward+ | No per-object light limit; required by the GPU Resident Drawer used for large objects. | 8.1, 9.2 |
-| BRG indirect draws, RenderMeshIndirect as baseline | GPU-driven instance counts; the baseline is for comparison and fallback. | 6.3 |
+| BRG indirect draws: procedural indexed with K = 16 blades per instance for Blade layers, mesh indirect for Object layers; Graphics.Render*Indirect as baseline | GPU-driven instance counts. Phase 1 measurements: K16 is 19% faster than one mesh instance per blade (tiny instances waste vertex work), BRG slightly faster than the baseline; the baseline is for comparison and fallback. | 6.3 |
 | GPU Resident Drawer not used for scatter | It draws scene GameObjects; GPU-generated blades have none. | 9.2 |
 | Chunks on a world grid, independent of terrain tiles | Same cost per chunk, whatever the terrain tile size or LOD scheme, and works for meshes. | 5.1 |
 | One arena per layer, not one buffer per chunk | One draw per layer x LOD needs all blades of a layer in one buffer. | 5.4 |
@@ -528,8 +536,6 @@ References without a link are from memory: verify exact titles before quoting th
 ### 16.2 Open items
 | Item | Resolved by |
 |---|---|
-| BRG indirect with a custom per-instance buffer read through the BRG index in URP shaders | Spike S1 (Implementation Phase 1) |
-| Draw command type per usage: mesh indirect or procedural indirect (K blades per instance) for Blade layers; mesh indirect for Object layers | Spikes S1 to S3 (Implementation Phase 1) |
 | Does the production terrain render its finest LOD within ~200 m? | Adapter checker on the production adapter (4.4) |
 | Is DLSS available in URP for the project's Unity version? | Check the Unity release notes |
 | Budget figures (10.1) | Phase 9 measurements |

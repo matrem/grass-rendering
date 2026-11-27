@@ -9,7 +9,7 @@ namespace Prototype.Editor
 {
     /// <summary>
     /// Creates the Phase 1 spike content: the <see cref="ScatterSpikeResources"/> asset of the package and the
-    /// scene <c>Assets/Scenes/Spike_Draw.unity</c> (a copy of Bootstrap with a <see cref="ScatterSpike"/> driver).
+    /// scene <c>Assets/Scenes/Spike_Draw.unity</c> (a copy of Bootstrap with a <see cref="ScatterSpike"/> driver and its <see cref="SpikeBenchmark"/>).
     /// Command line: Unity.exe -batchmode -quit -projectPath &lt;path&gt; -executeMethod Prototype.Editor.SpikeSceneBuilder.CreateSpikeContent -logFile &lt;file&gt;
     /// </summary>
     public static class SpikeSceneBuilder
@@ -86,8 +86,20 @@ namespace Prototype.Editor
             var serialized = new SerializedObject(spike);
             serialized.FindProperty("_resources").objectReferenceValue = resources;
             serialized.FindProperty("_cullCamera").objectReferenceValue = Camera.main;
-            serialized.FindProperty("_hud").objectReferenceValue = Object.FindAnyObjectByType<ScatterDebugHud>();
+            var hud = Object.FindAnyObjectByType<ScatterDebugHud>();
+            serialized.FindProperty("_hud").objectReferenceValue = hud;
             serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            var benchmark = spike.GetComponent<SpikeBenchmark>();
+            if (benchmark == null)
+            {
+                benchmark = spike.gameObject.AddComponent<SpikeBenchmark>();
+            }
+
+            var serializedBenchmark = new SerializedObject(benchmark);
+            serializedBenchmark.FindProperty("_spike").objectReferenceValue = spike;
+            serializedBenchmark.FindProperty("_hud").objectReferenceValue = hud;
+            serializedBenchmark.ApplyModifiedPropertiesWithoutUndo();
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene);

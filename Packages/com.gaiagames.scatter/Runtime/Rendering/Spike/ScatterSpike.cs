@@ -99,8 +99,18 @@ namespace Scatter.Rendering.Spike
         private int _bladeCountStep;
         private SpikeDebugView _debugView;
         private float _nextStatsTime;
+        private UrpPassTimings _passTimings;
+        private ScatterStageTimings _timings = ScatterStageTimings.NotMeasured;
 
         public ScatterSpikeSystem System => _system;
+
+        public Camera CullCamera => _cullCamera;
+
+        /// <summary>Timings of the last frame: spike CPU, cull GPU and URP pass GPU times (NaN = not measured).</summary>
+        public ScatterStageTimings Timings => _timings;
+
+        /// <summary>Requests the debug counters readback even when the HUD is hidden (benchmark).</summary>
+        public bool ForceStatsReadback { get; set; }
 
         private void OnEnable()
         {
@@ -138,6 +148,7 @@ namespace Scatter.Rendering.Spike
             config.OffsetMode = _offsetMode;
             config.Backend = _backend;
             _system = new ScatterSpikeSystem(_resources, config);
+            _passTimings = new UrpPassTimings();
             Shader.SetGlobalFloat(s_DebugView, 0f);
             UpdateStatus();
         }
@@ -146,6 +157,8 @@ namespace Scatter.Rendering.Spike
         {
             _system?.Dispose();
             _system = null;
+            _passTimings?.Dispose();
+            _passTimings = null;
             Shader.SetGlobalFloat(s_DebugView, 0f);
             if (_hud != null)
             {
@@ -174,20 +187,21 @@ namespace Scatter.Rendering.Spike
             // LateUpdate: after the camera moved this frame, before rendering.
             HandleKeys();
             bool hudVisible = _hud != null && _hud.isActiveAndEnabled && _hud.Visible;
-            bool readStats = hudVisible && Time.unscaledTime >= _nextStatsTime;
+            bool readStats = (hudVisible || ForceStatsReadback) && Time.unscaledTime >= _nextStatsTime;
             if (readStats)
             {
                 _nextStatsTime = Time.unscaledTime + StatsRefreshSeconds;
             }
 
             _system.Tick(_cullCamera, readStats);
+            _timings = ScatterStageTimings.NotMeasured;
+            _timings.CpuMainMs = _system.TickCpuMs;
+            _timings.CullGpuMs = _system.Config.ScatterEnabled ? _system.CullGpuMs : float.NaN;
+            _passTimings.Fill(ref _timings);
             if (_hud != null)
             {
-                ScatterStageTimings timings = ScatterStageTimings.NotMeasured;
-                timings.CpuMainMs = _system.TickCpuMs;
-                timings.CullGpuMs = _system.CullGpuMs;
-                _hud.StageTimings = timings;
-                if (readStats)
+                _hud.StageTimings = _timings;
+                if (readStats && hudVisible)
                 {
                     UpdateStatus();
                 }

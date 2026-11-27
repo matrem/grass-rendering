@@ -23,6 +23,9 @@ namespace Scatter.Rendering.Spike
         public SpikeBackend Backend;
         public bool ObjectsEnabled;
 
+        /// <summary>Off: no cull and no draw (baseline of the measurements).</summary>
+        public bool ScatterEnabled;
+
         public static ScatterSpikeConfig Default => new ScatterSpikeConfig
         {
             MaxBladeCount = 1 << 22,
@@ -39,6 +42,7 @@ namespace Scatter.Rendering.Spike
             OffsetMode = SpikeRegionOffsetMode.VisibleOffset,
             Backend = SpikeBackend.Brg,
             ObjectsEnabled = true,
+            ScatterEnabled = true,
         };
     }
 }
