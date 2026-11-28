@@ -159,6 +159,7 @@ Spike content: 1M blades on a flat grid, per-blade data (position, yaw) in a cus
 3. [x] **Shadow casters** (design 6.2): five presets of the blade casters (split visibility mask): all LODs in 4 cascades (Phase 1), LOD0 in 4 cascades, LOD0 in the first 2, LOD0 in the first, none. BRG only (Graphics.Render*Indirect cannot limit the cascades). Benchmark mode `-spikeBenchmarkLevers`: BRG, K16, 4M blades, 2 views x (baseline + falloff off, on, on with widening x 5 presets) = 32 cases.
 4. [x] Tests: new benchmark plans and CSV columns, density rule against a C# reference on the GPU, density curve and width factor, caster split masks per preset, URP settings applied and restored; no allocation.
 5. [x] Debug: F11 density falloff (off, on, on with widening), F12 caster preset; HUD state of both, counters of visible blades per LOD.
+6. [ ] Vertex shader cleanups that keep the image (added at the review): K-blade index buffers with a power-of-two vertex stride (8), so the shader splits `SV_VertexID` with a shift and a mask instead of an integer division; procedural draws read their visible entry without a branch on K, so the read of the instance setup is dropped by the compiler in the passes without ambient; the ambient of both blade sides from one SH evaluation (L0 and L2 once). Tests: index layout and stride constants mirrored in HLSL; the render tests check the image. Measured before and after on the levers benchmark (blades only).
 
 **Exit:** a cost model (vertex, fragment and shadow cost per visible blade, and the part independent of the blade count), a revised estimate for design 10.1, and the resulting adjustments to Phase 2 (and design 5.3, 6.2 if needed). **Stop and review before Phase 2.**
 
@@ -197,13 +198,15 @@ Spike content: 1M blades on a flat grid, per-blade data (position, yaw) in a cus
 
   - The cost is dominated by **vertex and triangle work**: tiny triangles in two camera passes and in each cascade. Pixels are a third of depth + colour at native 1440p.
   - Blades kept by the falloff cost more each in depth + colour (2.6 ms per million instead of 1.9): they are nearer, so bigger on screen.
-- **Revised estimate for design 10.1** (to present at the review): with the falloff and LOD0-only casters, one dense layer of **about 0.86M visible blades costs 2.45 to 2.8 ms**, at the 2.5 ms budget of the RTX 3060 Ti at native 1440p. Design 10.1 expected 1.5 to 2M visible blades within the budget; the design 12 stress reference (>= 4M visible blades) would cost about 8 ms even with LOD0-only casters.
-- **Proposals for the review** (not applied):
-  1. Design 6.2 and 7: shadow mode Near = LOD0 only for Blade layers. Limiting LOD0 to the first cascades saves only 0.12 ms (2 cascades) or 0.17 ms (1); the cascades end at 6.1 and 14.6 m and LOD0 at 20 m, so it can drop shadows from blades between 14.6 and 20 m. Decide with the Phase 8 visual check.
-  2. Design 5.3: the example density curve is kept (61% fewer far blades, scatter cost halved). Design 6.4 and Phase 2 item 8: add the widening to the blade shader v1 (0.07 ms).
-  3. Design 10.1 and 12: revise the visible blade figures from the cost model above.
-  4. Phase 2: vertex and triangle work dominates, so measure the LOD2 template (3 vertices, 1 triangle) and its distance early in Phase 2, and the cost of the DepthNormals prepass (SSAO, depth priming: two camera passes of vertex work, design 8.1).
-  5. Phase 3: an Object layer without limits (8k visible 515-vertex meshes, every cascade) costs about 4 ms. Object layers need their mesh LODs, density curve and shadow mode from the start, measured with low-poly test meshes.
+- **Revised estimate for design 10.1**: with the falloff and LOD0-only casters, one dense layer of **about 0.86M visible blades costs 2.45 to 2.8 ms**, at the 2.5 ms budget of the RTX 3060 Ti at native 1440p. Design 10.1 expected 1.5 to 2M visible blades within the budget; the design 12 stress reference (>= 4M visible blades) would cost about 8 ms even with LOD0-only casters.
+- **Decisions (accepted at the review, 2026-11-28)**, applied to design 2 (widening), 6.2, 6.4, 7, 10.1, 12, 13 and the 16.1 row:
+  1. Blade layers cast shadows from LOD0 only by default (shadow mode Near). Limiting the near casters to the first cascades saves only 0.12 ms (2 cascades) or 0.17 ms (1), and the cascades end at 6.1 and 14.6 m while LOD0 ends at 20 m: it stays an option of the quality tier (lower hardware), tested on the full system (Phases 8 and 9).
+  2. The example density curve is kept (61% fewer far blades, scatter cost halved), with widening (0.07 ms). Both are layer settings, tuned in Phase 9.
+  3. Design 10.1 and 12 use the cost model above: about 0.9M visible blades within the RTX 3060 Ti budget; the stress scene is a load reference above the budget.
+  4. Phase 2 measures the far blade LOD (LOD2 template, 3 vertices, 1 triangle) and its distance early, and the cost of the DepthNormals prepass (new Phase 2 item 11).
+  5. Every layer, Blade or Object, has mesh LODs, a density curve and a shadow mode from the start (Phase 3 items 2 and 4).
+- Not measured, for Phase 2: the arithmetic of the vertex shader is likely not the limit. At 1M visible blades a camera pass is about 5M vertices and 3M triangles in 0.6 ms, and the shadow pass (simplest shader) reaches about 7 billion triangles per second, close to the triangle setup rate of the GPU. Fewer triangles (blade LODs) and fewer passes are the levers; a GPU profiler (Nsight Graphics) can confirm it.
+- Buffers checked: every buffer of the draw path is GPU-only (default usage flags: no `LockBufferForWrite`, no `Dynamic`), written on the GPU or once with `SetData`; visible list and blade data are read in increasing address order. The spike draws blades in placement (R2) order, scattered on screen; Phase 2 stores them per cluster, which keeps consecutive triangles close on screen.
 
 ---
 
@@ -217,7 +220,7 @@ Spike content: 1M blades on a flat grid, per-blade data (position, yaw) in a cus
 5. [ ] Placer compute: progressive low-discrepancy points per cluster, rank (5.2), ring density, per-blade random values from the grid-position hash, 16-byte record (5.5), cluster ranges and bounds.
 6. [ ] Cull compute (6.2): args reset, cluster frustum test, LOD, N by rank, atomic reserve with region overflow guard, index write.
 7. [ ] BRG backend (and RenderMeshIndirect backend behind the same interface).
-8. [ ] Blade shader v1: decode record, place and orient blade, density fade by rank (6.4). Includes `DepthOnly` and `DepthNormals` passes from the start (8.1: required with depth priming).
+8. [ ] Blade shader v1: decode record, place and orient blade, density fade by rank and widening (6.4). Includes `DepthOnly` and `DepthNormals` passes from the start (8.1: required with depth priming).
 9. [ ] Debug (12.1, 12.2): stats buffer written by the cull + `AsyncGPUReadback`; HUD timings per stage, blade counts, arena and visible-list fill, overflow and pool-full warnings; views by LOD, ring and rank, cluster grid; freeze culling; backend switch.
    - Debug controls panel: design 12.2 lists more controls than free function keys. Choose between URP's Rendering Debugger (`DebugManager`, custom panel with toggles and enums, Editor and development players, mouse, keyboard or gamepad) and buttons in the HUD (UI Toolkit); decide with the user before building it.
 10. [ ] Tests:
@@ -226,6 +229,7 @@ Spike content: 1M blades on a flat grid, per-blade data (position, yaw) in a cus
    - GPU (dispatch on small inputs, read back, compare with a C# reference):
      - placer: determinism (identical bits on two runs), subset property (sparse block is a prefix of dense block), rank sorted per cluster, cluster bounds contain their records, per-blade random values unchanged after a floating-origin shift;
      - cull: visible count and draw arguments match the C# reference for a synthetic camera, args reset, overflow guard counts skipped clusters.
+11. [ ] Measurements (Phase 1b decision 4), on the real pipeline, with the S3 benchmark method: the blade LOD distances and the LOD2 template (1 triangle) for far blades, against the cost model of design 10.1; the cost of the DepthNormals prepass (depth priming Auto vs off, SSAO on vs off).
 
 **Exit:** a few million stored blades on a flat plane; flying around shows no popping; debug view shows rings, clusters and LODs; backends switchable at runtime.
 
@@ -234,9 +238,9 @@ Spike content: 1M blades on a flat grid, per-blade data (position, yaw) in a cus
 ## Phase 3 - Layers
 **Goal:** multiple layers through one pipeline (design section 7).
 1. [ ] `ScatterLayer` asset and its GPU mirror; scatter profile asset per ground source.
-2. [ ] Per-layer arena, density curve, rings, LOD meshes, shadow mode.
+2. [ ] Per-layer arena, density curve with widening, rings, LOD meshes, shadow mode. Every layer, Blade or Object, has them from the start (Phase 1b: an Object layer without them cost 4 ms).
 3. [ ] Object kind: URP Lit-based shader variant for small rocks and bushes.
-4. [ ] Test content: 2 grass types, 1 flower, 1 bush, 1 small rock.
+4. [ ] Test content: 2 grass types, 1 flower, 1 bush, 1 small rock. Object meshes are low-poly with mesh LODs; the cost of each layer is measured against design 10.1.
 5. [ ] Debug: per-layer HUD rows, view by layer, layer toggles.
 6. [ ] Tests: C# structs mirrored to the GPU have the HLSL size and layout; per-layer density and range applied by the placer and the cull.
 
@@ -302,7 +306,7 @@ Spike content: 1M blades on a flat grid, per-blade data (position, yaw) in a cus
 ## Phase 8 - Lighting, shadows, motion vectors
 **Goal:** full URP integration (8.1, 8.2, 8.5).
 1. [ ] Final blade shading: gradient, tint, root AO, translucency, ground-normal blending, Forward+ additional lights.
-2. [ ] Shadow receiving; shadow casting per layer (Off/Near/All); widened frustum for shadow-casting LODs; near casters limited to the first cascades (6.2). Check the Phase 1 difference: in players, the Graphics.Render*Indirect backend gives slightly less blade self-shadowing than BRG.
+2. [ ] Shadow receiving; shadow casting per layer (Off/Near/All, Near = LOD0 only); widened frustum for shadow-casting LODs; optional limit of the near casters to the first cascades, per quality tier (6.2): visual check and cost on the full system. Check the Phase 1 difference: in players, the Graphics.Render*Indirect backend gives slightly less blade self-shadowing than BRG.
 3. [ ] DepthOnly/DepthNormals checked with SSAO and depth priming.
 4. [ ] Motion-vector pass with previous-frame wind and interaction; check TAA and STP.
 5. [ ] Debug: shadow-casters view; shadow mode and depth priming toggles.

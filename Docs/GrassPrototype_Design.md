@@ -42,6 +42,7 @@ Terms are grouped by theme. The section in brackets gives the details.
 | **Scatter profile** | Asset attached to a ground source: which layers it receives and which mask channel drives each. (4.3) |
 | **Density** | Fraction (0 to 1) of a layer's full blade count that is kept. Decreases with distance, following the layer's density curve. (5.2, 5.3) |
 | **Rank** | A fixed per-blade number in [0,1) deciding which blades are removed first when density decreases (lowest ranks are kept). (5.2) |
+| **Widening** | Blades kept at a lower density are drawn wider, so the far grass keeps covering the ground. (6.4) |
 | **Mesh LOD** | Simpler blade geometry used at distance (e.g. 7, 5, 3 vertices): fewer segments of the blade template for Blade layers, a simpler mesh for Object layers. Not to be confused with rings. (6.2, 6.3, 7) |
 | **Blade template** | The blade shape of one mesh LOD (segments from root to tip), built in the vertex shader from `SV_VertexID`; no mesh. (6.3) |
 | **K (blades per instance)** | Number of blades one instance of a Blade layer draw covers, through an index buffer repeating the blade template K times. (6.3) |
@@ -293,11 +294,11 @@ The rank is not used as a random value: all clusters use the same point sequence
 3. One atomic add on the draw args of (layer, LOD) reserves N entries in that region of the visible list. Regions are sized from the quality tier; if a region is full, the cluster is skipped and counted in the debug HUD (12.1; never a buffer overrun).
 4. The group's threads write N blade indices (start of cluster range + i). 4 bytes per blade, nothing is read from the arena.
 
-Shadow casting uses the same visible list (only for the layers and LODs configured to cast). This misses shadows from blades just outside the camera frustum; acceptable for small near blades, and reduced by widening the frustum test for shadow-casting LODs (the extra off-screen blades cost only vertex work in the camera passes). Near casters are submitted only to the first shadow cascades (BRG split visibility mask), as they are too small to matter in far cascades.
+Shadow casting uses the same visible list (only for the layers and LODs configured to cast). This misses shadows from blades just outside the camera frustum; acceptable for small near blades, and reduced by widening the frustum test for shadow-casting LODs (the extra off-screen blades cost only vertex work in the camera passes). Every blade submitted to a cascade runs the vertex shader there, even far outside it, which is why the default shadow mode of Blade layers casts from LOD0 only (7). Measured in Phase 1b on 0.86M visible blades: all LODs in 4 cascades 1.7 ms, LOD0 only 0.25 ms. Near casters can also be limited to the first shadow cascades (BRG split visibility mask): it saves little (0.12 ms for the first 2 of 4 cascades) and can drop the shadows of LOD0 blades beyond the last of those cascades, so it is an option of the quality tier (lower hardware), tested on the full system (Phases 8 and 9).
 
 ### 6.3 Drawing
 - **Command types** (measured in Phase 1, S3: on 2.1M visible blades, 19% faster than one mesh instance per blade; a plateau from K = 16):
-  - **Blade layers:** procedural indexed indirect (`BatchDrawCommandProceduralIndirect` with an index buffer). No mesh: the vertex shader builds the blade template of the mesh LOD from `SV_VertexID`, and one instance draws **K = 16 blades** through an index buffer repeating the template K times. The cull rounds the instance count up and pads the region with an empty entry, which the vertex shader collapses.
+  - **Blade layers:** procedural indexed indirect (`BatchDrawCommandProceduralIndirect` with an index buffer). No mesh: the vertex shader builds the blade template of the mesh LOD from `SV_VertexID`, and one instance draws **K = 16 blades** through an index buffer repeating the template K times, 8 vertex IDs apart (a power of two: the shader splits the ID with a shift and a mask). The cull rounds the instance count up and pads the region with an empty entry, which the vertex shader collapses.
   - **Object layers:** mesh indirect (`BatchDrawCommandIndirect`), one mesh instance per object.
   - Shadow, depth and motion-vector passes use the command of the colour pass, sent again for each view.
 - **BRG (main path):** one indirect draw command per (layer, LOD). Its `visibleInstancesBufferHandle` is the whole visible list and its `visibleOffset` the first entry of the region; its `indirectArgsBufferHandle` points to the args written by the cull. The visible instances window (`visibleInstancesBufferWindowOffset`) is not used: on D3D12 and Vulkan BRG works with raw buffers and rejects a window (Phase 1 finding). Per-instance BRG metadata is not used: the batch has an empty metadata list, and the shader reads the blade record from the arena with the index provided by BRG (`GetDOTSInstanceIndex`).
@@ -307,6 +308,7 @@ Shadow casting uses the same visible list (only for the layers and LODs configur
 
 ### 6.4 Smooth transitions
 - **Density:** in the vertex shader, each blade shrinks to zero as its rank approaches `density(its own distance)`. Blades disappear by fading, not popping.
+- **Widening:** the blades kept at a lower density are wider, so the far grass keeps covering the ground: width x `1/sqrt(density)`, capped by the layer (default 3; full compensation, `1/density`, would make far blades up to 16 times wider). The distance is measured to the cull camera, the same in every pass (in the shadow pass the URP camera position is the light). Measured in Phase 1b: 0.07 ms.
 - **Mesh LOD:** switch per cluster. Blade LOD templates are designed to look identical at the switch distance; a dither band is added only if switching is visible.
 
 ---
@@ -317,9 +319,12 @@ A `ScatterLayer` asset defines:
 - **Kind:** Blade (custom grass shader, wind, interaction) or Object (small rocks, bushes: URP Lit-based shader, no or little wind).
 - Per mesh LOD: the blade template (segment count, width and curve) for the Blade kind, a mesh for the Object kind; the material.
 - Density (blades per m^2 at full density) and density curve over distance; ring boundaries; scatter range.
+- Widening cap (6.4).
 - Scale range, slope and altitude limits, alignment (ground normal or world up), random tint.
 - Wind weight, interaction weight.
-- Shadow casting: Off / Near (LOD0 only) / All. Quality tiers can lower it.
+- Shadow casting: Off / Near (LOD0 only, the default of Blade layers) / All. Quality tiers can lower it, and can limit Near casters to the first cascades (6.2).
+
+**Every layer, Blade or Object, has mesh LODs, a density curve and a shadow mode**: there is no layer without them. Phase 1b measured an Object layer without them (8,000 visible 515-vertex meshes up to 120 m, casting in every cascade) at 4 ms, more than the whole scatter budget.
 
 All layers share the generation and cull compute shaders; each layer has its own arena and draw commands.
 
@@ -335,7 +340,7 @@ The forward pass declares the URP Forward+ keyword `_CLUSTER_LIGHT_LOOP`, as URP
 Depth priming makes the vertex shader run twice for each blade (depth pass + colour pass). This removes overdraw shading but doubles vertex work, which is significant for grass: measured on and off in Phase 9.
 
 ### 8.2 Blade shading
-Root-to-tip colour gradient, per-blade tint, root ambient occlusion, cheap translucency, normal blended toward the ground normal (reads as a coherent mass), terrain albedo tint at the root. Forward+ additional lights through the URP cluster loop. Ambient: Unity's SH (`SampleSH`) evaluated per vertex, for both sides of the blade. Double-sided; far LOD slightly faces the camera.
+Root-to-tip colour gradient, per-blade tint, root ambient occlusion, cheap translucency, normal blended toward the ground normal (reads as a coherent mass), terrain albedo tint at the root. Forward+ additional lights through the URP cluster loop. Ambient: Unity's SH evaluated per vertex for both sides of the blade at once (the L0 and L2 bands are the same for both sides, L1 changes sign). Double-sided; far LOD slightly faces the camera.
 
 ### 8.3 Wind (vertex shader only)
 - Scrolling tileable noise sampled by world XZ, plus a larger, slower gust noise.
@@ -378,15 +383,23 @@ Settings: 200 blades/m^2 at full density; rings 0-30 m (100%), 30-80 m (25%), 80
 | Stored blades | 2.5M | 1.1M | 1.5M | ~5M |
 | Arena memory | 39 MB | 18 MB | 25 MB | ~80 MB |
 
-Per frame (about one third of stored blades visible, ~1.5-2M):
+Per frame (the stored blades within the camera frustum, thinned by the density curve: about 0.9M visible):
 | Work | Cost |
 |---|---|
 | CPU | ~150 chunk frustum tests, a few hundred block entries uploaded, a fixed set of draws |
-| Cull compute | ~2,500 clusters; writes ~8 MB of indices |
-| Vertex input | ~8 MB of indices + ~30 MB of blade records |
+| Cull compute | ~2,500 clusters; writes ~4 MB of indices |
+| Vertex input | ~4 MB of indices + ~15 MB of blade records |
 | Generation | Only for new/closer chunks; a full chunk is ~200k candidate points, well under 0.1 ms |
 
-Reaching 4-5M visible blades means more layers or higher densities; this is what the stress scene measures. The dominant GPU cost is expected to be **rasterising many small triangles and shadow passes**, not the compute work; this is why far blades are fewer and wider, and shadows are limited per layer.
+**GPU cost model** (measured in Phase 1b on the spike, RTX 3060 Ti, 1440p, per million visible blades):
+| Part | Cost |
+|---|---|
+| Depth + colour, vertex and triangle work (DepthNormals prepass and colour pass) | 1.2 ms |
+| Depth + colour, pixels | 0.18 ms per million pixels: 0.66 ms at 1440p |
+| Shadows | 0.44 ms per cascade the blades are submitted to; independent of the shadow map resolution |
+| Independent of the blade count | about 0 |
+
+The cost is **vertex and triangle work on many tiny triangles**, not pixels nor compute. With the density curve and LOD0-only shadow casters, one dense layer of **0.86M visible blades costs 2.45 to 2.8 ms** (2 test views), at the RTX 3060 Ti budget. The levers that remain are fewer triangles per far blade (blade LODs, Phase 2) and fewer passes (DepthNormals prepass, Phase 9). The stress scene (4-5M visible blades, more layers or higher densities) is a load test above the budget: about 8 ms for 4M visible blades with LOD0-only casters on the RTX 3060 Ti.
 
 ### 10.2 Rules
 - No GPU readback in the steady-state frame (only exception: the non-blocking debug stats readback of 12.1).
@@ -413,7 +426,8 @@ All metrics are measured on the scripted camera paths (walk, run, fast fly) and 
 | Generation GPU time in any single frame | <= 0.4 ms | <= 0.3 ms |
 | CPU main thread for scatter | <= 0.5 ms | <= 0.5 ms |
 | CPU render thread for scatter (draw submission, measured in the Profiler) | <= 0.3 ms | <= 0.3 ms |
-| Visible blades in stress scene (reference) | >= 4M | >= 5M |
+| Visible blades within the scatter GPU budget (all layers) | >= 0.9M (Phase 1b, spike) | to measure (Phase 9) |
+| Visible blades in stress scene (load reference, above the budget) | >= 4M | >= 5M |
 
 **Stability** (no hitches, no growth over time)
 | Metric | Target (both tiers) |
@@ -469,7 +483,7 @@ Controls:
 | Risk | Mitigation |
 |---|---|
 | BRG indirect draws + custom buffers in URP shaders behave differently than expected | Spike first; RenderMeshIndirect baseline |
-| Small-triangle rasterisation and shadow cost | Wider far LODs, density falloff, shadows per layer and limited to first cascades, measured separately |
+| Small-triangle rasterisation and shadow cost (confirmed in Phase 1b: vertex and triangle work dominates) | Density falloff with widening, fewer triangles per far blade (blade LODs), LOD0-only shadow casters, optional cascade limit per tier, measured separately |
 | Depth priming doubles grass vertex work | Measure on/off; keep the vertex shader lean |
 | Fixed block sizes waste memory on sparse masks | Measure; variable sizes later if needed |
 | Generation can't keep up with a fast camera | Distance-sorted queue, sparser blocks drawn meanwhile, budget per tier |
@@ -530,6 +544,7 @@ References without a link are from memory: verify exact titles before quoting th
 | Static ground only; moving ground is a future improvement | Scope of the prototype. | 9.1 |
 | Large objects (houses, trees, big rocks) in a separate streamed system | Pre-generated placement, different needs. | 9.2 |
 | Hand-written HLSL, no alpha clipping | Full control of passes; early depth test stays effective. | 8.1 |
+| Every layer has mesh LODs, a density curve with widening, and a shadow mode; Blade layers cast from LOD0 only by default; limiting casters to the first cascades is a quality-tier option | Phase 1b: the cost is vertex and triangle work. The density curve halves it, LOD0-only casters cut the shadow pass from 1.7 to 0.25 ms on 0.86M visible blades, widening costs 0.07 ms; an Object layer without limits cost 4 ms. The cascade limit saves 0.12 ms and can drop shadows: kept for lower hardware, tested with the full system. | 6.2, 6.4, 7, 10.1 |
 | Upscaling: URP STP; DLSS not assumed | STP is built into URP. | 8.5 |
 | Debug HUD, views and controls are part of the design | GPU-driven work is invisible without them. | 12.1, 12.2 |
 
