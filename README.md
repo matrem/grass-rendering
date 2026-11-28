@@ -17,6 +17,7 @@ Prototype of a **GPU-driven procedural scatter system** (grass, flowers, moss, s
 | Understand the target architecture and why | [Docs/GrassPrototype_Design.md](Docs/GrassPrototype_Design.md) (section 2 is the vocabulary) |
 | Know what is done and what comes next | [Docs/GrassPrototype_Implementation.md](Docs/GrassPrototype_Implementation.md) |
 | Write code in this project | [Docs/CodingRules.md](Docs/CodingRules.md) |
+| Branch, commit, merge and tag with git | [Docs/GitWorkflow.md](Docs/GitWorkflow.md) |
 | Use the scatter package in another project | [Packages/com.gaiagames.scatter/README.md](Packages/com.gaiagames.scatter/README.md) |
 
 ## Quick start
@@ -46,7 +47,7 @@ Packages/com.gaiagames.scatter/   The scatter system (embedded package, no depen
 Assets/Prototype/                 Prototype-only code: fly camera, build script (later: mock terrain, player)
 Assets/Scenes/                    Test scenes (Bootstrap for now)
 Assets/Settings/                  URP assets and the ScatterQuality asset of each quality tier
-Docs/                             Design, implementation plan, project guide, coding rules
+Docs/                             Design, implementation plan, project guide, coding rules, git workflow, measurements
 ```
 
 ## Command line

@@ -54,7 +54,8 @@ Assets/
   Scenes/Spike_Draw.unity              Phase 1 BRG draw spike, second scene of the build
   Settings/                            URP assets (PC_RPAsset, PC_Renderer), volume profiles
   Settings/Scatter/                    ScatterQuality_RTX3060Ti, ScatterQuality_RTX5070Ti
-Docs/                                  Design, implementation plan, this guide, coding rules
+Docs/                                  Design, implementation plan, this guide, coding rules, git workflow
+Docs/Measurements/                     Benchmark CSVs and probe reports, one folder per phase, with a README
 Builds/                                Player builds (ignored by git)
 ```
 
