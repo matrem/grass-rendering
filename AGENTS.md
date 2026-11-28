@@ -18,6 +18,7 @@ Before any work, read these documents:
   - tick the item and update the phase status in the implementation plan;
   - record deviations and findings in a **Notes** list at the end of the phase;
   - if a design decision changes, update the design section and its row in design 16.1. Do not reopen a 16.1 decision without new facts; ask the user first;
+  - update `Packages/com.gaiagames.scatter/README.md` when the package's requirements (project settings, dependencies), contents or public usage change: it is what a project importing the package reads;
   - update `Docs/ProjectGuide.md` so it describes what exists (new or changed classes, assemblies, folders, settings, debug tools, tests), and the status line of `README.md` when a phase changes.
 - Use the vocabulary of design section 2 in code, comments and documents (chunk, cluster, ring, block, arena, rank, blade record...). Add new terms to the vocabulary.
 

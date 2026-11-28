@@ -27,6 +27,7 @@ How this document is kept up to date (in the same commit as the code):
 - When the work differs from the plan, or a phase produces findings (spike results, measurements), add a **Notes** list at the end of that phase: what changed and why.
 - If a change affects a design decision, update the design document too (the relevant section and the decision table 16.1). The design describes what is true now; git history keeps the past.
 - Update `Docs/ProjectGuide.md` (what exists and how it works) and, when a phase status changes, the status line of `README.md`.
+- Update the package README (`Packages/com.gaiagames.scatter/README.md`) when the package's requirements, contents or public usage change.
 - New work discovered on the way is added as a new item in the right phase, not kept elsewhere.
 
 ---
