@@ -7,6 +7,7 @@
 
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 #include "SpikeCommon.hlsl"
+#include "SpikeDensity.hlsl"
 
 CBUFFER_START(UnityPerMaterial)
     float4 _BaseColor;
@@ -105,6 +106,12 @@ SpikeSurface SpikeComputeSurface(Attributes input)
     uint hash = SpikeHash(entry);
     float height = _BladeHeight * lerp(0.7, 1.3, SpikeHashToUnit(hash));
     float width = _BladeWidth * lerp(0.8, 1.2, SpikeHashToUnit(SpikeHash(hash)));
+    if (_SpikeDensityValues.z > 1.0)
+    {
+        // Phase 1b: fewer, wider far blades (design 10.1). Distance to the cull camera, the same in every pass.
+        width *= SpikeWidenFactor(SpikeDensityAtDistance(distance(instance.xyz, _SpikeCullCameraPosition.xyz)));
+    }
+
     float sinYaw;
     float cosYaw;
     sincos(instance.w, sinYaw, cosYaw);

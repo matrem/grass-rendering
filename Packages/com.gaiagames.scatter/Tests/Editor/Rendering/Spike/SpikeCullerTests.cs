@@ -25,6 +25,19 @@ namespace Scatter.Tests.Rendering.Spike
 
         // Instances closer than this to a cull boundary may fall on either side on the GPU: not compared.
         private const float BoundaryToleranceMeters = 1e-3f;
+
+        // Instances whose rank is this close to the density at their distance: not compared (GPU rounding).
+        private const float RankTolerance = 1e-4f;
+
+        // A curve scaled to the test grid (4 to 50 m from the camera): 1 up to 5 m, 0.5 at 15 m, 0.1 at 35 m.
+        private static readonly SpikeDensityCurve s_TestCurve = new SpikeDensityCurve
+        {
+            NearDistanceMeters = 5f,
+            MidDistanceMeters = 15f,
+            MidDensity = 0.5f,
+            FarDistanceMeters = 35f,
+            FarDensity = 0.1f,
+        };
         private const uint UntouchedEntry = 0xDEADBEEF;
 
         private ComputeShader _compute;
@@ -123,6 +136,32 @@ namespace Scatter.Tests.Rendering.Spike
             Assert.That(counters[culler.OverflowCounterIndex], Is.EqualTo(0u));
             Assert.That(args0, Is.EqualTo(new uint[] { 15, counters[Lod0Region], 0, 0, 0 }));
             Assert.That(args1, Is.EqualTo(new uint[] { 9, counters[Lod1Region], 0, 0, 0 }));
+        }
+
+        [Test]
+        public void Cull_WithDensityFalloff_KeepsTheRanksBelowTheDensity_PerRegion()
+        {
+            // Shuffled: in grid order the rank (index / count) would follow the distance to the camera.
+            Vector4[] instances = Shuffle(CreateGrid(41, 1f), 619);
+            SpikeCuller culler = CreateCuller(new[] { instances.Length, instances.Length }, 1);
+            culler.SetDensityCurve(s_TestCurve);
+            SpikeInstanceSet set = CreateInstanceSet(instances);
+            Vector3 cameraPosition = new Vector3(0f, 1.5f, -25f);
+            Plane[] planes = CreateFrustumPlanes(cameraPosition);
+
+            RunCull(culler, set, instances.Length, cameraPosition, planes, true);
+
+            uint[] counters = Read(culler.Counters, culler.RegionCount + 1);
+            uint[] visible = Read(culler.VisibleList, culler.VisibleEntryCount);
+            Reference(instances, cameraPosition, planes, s_TestCurve, out HashSet<uint> lod0, out HashSet<uint> lod1, out HashSet<uint> ambiguous);
+            Reference(instances, cameraPosition, planes, null, out HashSet<uint> allLod0, out HashSet<uint> allLod1, out _);
+
+            Assert.That(lod0.Count, Is.GreaterThan(0), "Test setup: no instance kept in LOD0.");
+            Assert.That(lod1.Count, Is.GreaterThan(0), "Test setup: no instance kept in LOD1.");
+            Assert.That(lod1.Count, Is.LessThan(allLod1.Count / 2), "Test setup: the falloff removes most far instances.");
+            Assert.That(lod0.Count, Is.LessThan(allLod0.Count), "Test setup: the falloff removes some near instances.");
+            AssertRegion(visible, culler.GetRegionStart(Lod0Region), counters[Lod0Region], lod0, ambiguous, "LOD0");
+            AssertRegion(visible, culler.GetRegionStart(Lod1Region), counters[Lod1Region], lod1, ambiguous, "LOD1");
         }
 
         [Test]
@@ -261,7 +300,7 @@ namespace Scatter.Tests.Rendering.Spike
             SpikeInstanceSet set = CreateInstanceSet(instances);
             Vector3 cameraPosition = new Vector3(0f, 1.5f, -25f);
             Plane[] planes = CreateFrustumPlanes(cameraPosition);
-            var layer = new SpikeCullLayer(Lod0Region, Lod1Region, Lod1DistanceMeters, MaxDistanceMeters, RadiusMeters);
+            var layer = new SpikeCullLayer(Lod0Region, Lod1Region, Lod1DistanceMeters, MaxDistanceMeters, RadiusMeters, true);
             RecordFrame(culler, set, instances.Length, cameraPosition, planes, layer);
 
             Assert.That(() => RecordFrame(culler, set, instances.Length, cameraPosition, planes, layer), Is.Not.AllocatingGCMemory());
@@ -276,9 +315,10 @@ namespace Scatter.Tests.Rendering.Spike
             culler.RecordFinalize(_cmd);
         }
 
-        private void RunCull(SpikeCuller culler, SpikeInstanceSet set, int count, Vector3 cameraPosition, Plane[] planes)
+        private void RunCull(SpikeCuller culler, SpikeInstanceSet set, int count, Vector3 cameraPosition, Plane[] planes, bool densityFalloff = false)
         {
-            RecordFrame(culler, set, count, cameraPosition, planes, new SpikeCullLayer(Lod0Region, Lod1Region, Lod1DistanceMeters, MaxDistanceMeters, RadiusMeters));
+            RecordFrame(culler, set, count, cameraPosition, planes,
+                new SpikeCullLayer(Lod0Region, Lod1Region, Lod1DistanceMeters, MaxDistanceMeters, RadiusMeters, densityFalloff));
             Graphics.ExecuteCommandBuffer(_cmd);
         }
 
@@ -310,6 +350,18 @@ namespace Scatter.Tests.Rendering.Spike
             return instances;
         }
 
+        /// <summary>Reorders the instances: entry i takes instance (i x step) mod count. Step and count must be coprime.</summary>
+        private static Vector4[] Shuffle(Vector4[] instances, int step)
+        {
+            var shuffled = new Vector4[instances.Length];
+            for (int i = 0; i < instances.Length; i++)
+            {
+                shuffled[i] = instances[(int)((long)i * step % instances.Length)];
+            }
+
+            return shuffled;
+        }
+
         /// <summary>Planes of a camera at <paramref name="position"/> looking along +Z: 60 degrees, square, 0.1 to 100 m.</summary>
         private static Plane[] CreateFrustumPlanes(Vector3 position)
         {
@@ -322,6 +374,13 @@ namespace Scatter.Tests.Rendering.Spike
 
         private static void Reference(Vector4[] instances, Vector3 cameraPosition, Plane[] planes, out HashSet<uint> lod0, out HashSet<uint> lod1, out HashSet<uint> ambiguous)
         {
+            Reference(instances, cameraPosition, planes, null, out lod0, out lod1, out ambiguous);
+        }
+
+        /// <param name="curve">Density falloff (design 5.2: keep rank = index / count below the density); null: off.</param>
+        private static void Reference(Vector4[] instances, Vector3 cameraPosition, Plane[] planes, SpikeDensityCurve? curve,
+            out HashSet<uint> lod0, out HashSet<uint> lod1, out HashSet<uint> ambiguous)
+        {
             lod0 = new HashSet<uint>();
             lod1 = new HashSet<uint>();
             ambiguous = new HashSet<uint>();
@@ -332,6 +391,14 @@ namespace Scatter.Tests.Rendering.Spike
                 bool nearBoundary = Mathf.Abs(distance - MaxDistanceMeters) < BoundaryToleranceMeters
                     || Mathf.Abs(distance - Lod1DistanceMeters) < BoundaryToleranceMeters;
                 bool inside = distance < MaxDistanceMeters;
+                if (curve.HasValue)
+                {
+                    float rank = (float)i / instances.Length;
+                    float density = curve.Value.Evaluate(distance);
+                    nearBoundary |= Mathf.Abs(rank - density) < RankTolerance;
+                    inside &= rank < density;
+                }
+
                 for (int p = 0; p < planes.Length; p++)
                 {
                     float planeDistance = planes[p].GetDistanceToPoint(position) + RadiusMeters;

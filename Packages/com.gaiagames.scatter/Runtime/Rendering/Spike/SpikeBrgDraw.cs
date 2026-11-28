@@ -26,5 +26,11 @@ namespace Scatter.Rendering.Spike
 
         public bool CastShadows;
         public bool Enabled;
+
+        /// <summary>Blade draw: its shadow cascades follow <see cref="SpikeBrgRenderer.ShadowCasters"/>. Other draws cast in every cascade.</summary>
+        public bool IsBlade;
+
+        /// <summary>Mesh LOD of a blade draw (0 or 1).</summary>
+        public int Lod;
     }
 }

@@ -54,6 +54,9 @@ namespace Scatter.Rendering.Spike
         private static readonly int s_BoundingRadius = Shader.PropertyToID("_SpikeBoundingRadiusMeters");
         private static readonly int s_Lod0Region = Shader.PropertyToID("_SpikeLod0Region");
         private static readonly int s_Lod1Region = Shader.PropertyToID("_SpikeLod1Region");
+        private static readonly int s_DensityFalloff = Shader.PropertyToID("_SpikeDensityFalloff");
+        private static readonly int s_DensityDistances = Shader.PropertyToID("_SpikeDensityDistances");
+        private static readonly int s_DensityValues = Shader.PropertyToID("_SpikeDensityValues");
         private static readonly int s_Draws = Shader.PropertyToID("_SpikeDraws");
         private static readonly int s_Args = Shader.PropertyToID("_SpikeArgs");
         private static readonly int s_DrawCount = Shader.PropertyToID("_SpikeDrawCount");
@@ -67,6 +70,8 @@ namespace Scatter.Rendering.Spike
         private readonly int[] _regionCapacities;
         private readonly Vector4[] _frustumPlanes = new Vector4[FrustumPlaneCount];
         private Vector4 _cameraPosition;
+        private Vector4 _densityDistances = SpikeDensityCurve.Default.ToDistancesVector();
+        private Vector4 _densityValues = SpikeDensityCurve.Default.ToValuesVector(1f);
         private GraphicsBuffer _regions;
         private GraphicsBuffer _draws;
         private int _drawCount;
@@ -191,6 +196,13 @@ namespace Scatter.Rendering.Spike
             }
         }
 
+        /// <summary>Density curve of the layers culled with <see cref="SpikeCullLayer.DensityFalloff"/> (Phase 1b).</summary>
+        public void SetDensityCurve(in SpikeDensityCurve curve)
+        {
+            _densityDistances = curve.ToDistancesVector();
+            _densityValues = curve.ToValuesVector(1f);
+        }
+
         /// <summary>Step 0 of design 6.2: resets the region counters. Record once per frame, before the culls.</summary>
         public void RecordReset(CommandBuffer cmd)
         {
@@ -221,6 +233,9 @@ namespace Scatter.Rendering.Spike
             cmd.SetComputeFloatParam(_compute, s_BoundingRadius, layer.BoundingRadiusMeters);
             cmd.SetComputeIntParam(_compute, s_Lod0Region, layer.Lod0Region);
             cmd.SetComputeIntParam(_compute, s_Lod1Region, layer.Lod1Region);
+            cmd.SetComputeIntParam(_compute, s_DensityFalloff, layer.DensityFalloff ? 1 : 0);
+            cmd.SetComputeVectorParam(_compute, s_DensityDistances, _densityDistances);
+            cmd.SetComputeVectorParam(_compute, s_DensityValues, _densityValues);
             DispatchPerInstance(cmd, _cullKernel, count);
         }
 

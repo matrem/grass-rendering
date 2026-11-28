@@ -26,6 +26,17 @@ namespace Scatter.Rendering.Spike
         /// <summary>Off: no cull and no draw (baseline of the measurements).</summary>
         public bool ScatterEnabled;
 
+        /// <summary>Phase 1b: density falloff of the blades (rank below the density at their distance), with or without widening.</summary>
+        public SpikeDensityFalloff DensityFalloff;
+
+        public SpikeDensityCurve DensityCurve;
+
+        /// <summary>Largest width factor of <see cref="SpikeDensityFalloff.OnWiden"/> (width x 1/sqrt(density), capped).</summary>
+        public float WidenMaxFactor;
+
+        /// <summary>Phase 1b: which blade LODs cast shadows, into which cascades (design 6.2).</summary>
+        public SpikeShadowCasters ShadowCasters;
+
         public static ScatterSpikeConfig Default => new ScatterSpikeConfig
         {
             MaxBladeCount = 1 << 22,
@@ -43,6 +54,10 @@ namespace Scatter.Rendering.Spike
             Backend = SpikeBackend.Brg,
             ObjectsEnabled = true,
             ScatterEnabled = true,
+            DensityFalloff = SpikeDensityFalloff.Off,
+            DensityCurve = SpikeDensityCurve.Default,
+            WidenMaxFactor = 3f,
+            ShadowCasters = SpikeShadowCasters.AllLodsAllCascades,
         };
     }
 }

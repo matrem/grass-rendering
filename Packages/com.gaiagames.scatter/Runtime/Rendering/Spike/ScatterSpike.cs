@@ -10,7 +10,8 @@ namespace Scatter.Rendering.Spike
     /// <summary>
     /// Scene driver of the Phase 1 spike: holds the settings, handles the keys and feeds the debug HUD.
     /// The work is done by <see cref="ScatterSpikeSystem"/>.
-    /// Keys: F3 blade draw type, F4 region offset mode, F5 blade count, F6 K, F7 objects, F8 debug view (SpikeDebugView), F9 backend.
+    /// Keys: F3 blade draw type, F4 region offset mode, F5 blade count, F6 K, F7 objects, F8 debug view (SpikeDebugView), F9 backend,
+    /// F11 density falloff (Phase 1b), F12 shadow casters (Phase 1b).
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class ScatterSpike : MonoBehaviour
@@ -71,6 +72,16 @@ namespace Scatter.Rendering.Spike
         [SerializeField, Tooltip("Draw backend at start (F9 switches): BRG or the Graphics.Render*Indirect baseline.")]
         private SpikeBackend _backend = SpikeBackend.Brg;
 
+        [Header("Phase 1b")]
+        [SerializeField, Tooltip("Density falloff at start (F11 cycles): off, on (100% up to 30 m, 25% at 80 m, 6% at 200 m), on with widening.")]
+        private SpikeDensityFalloff _densityFalloff = SpikeDensityFalloff.Off;
+
+        [SerializeField, Range(1f, 8f), Tooltip("Largest width factor of the widening (width x 1/sqrt(density), capped).")]
+        private float _widenMaxFactor = 3f;
+
+        [SerializeField, Tooltip("Blade shadow casters at start (F12 cycles).")]
+        private SpikeShadowCasters _shadowCasters = SpikeShadowCasters.AllLodsAllCascades;
+
 #if SCATTER_INPUT_SYSTEM
         [SerializeField, Tooltip("Key cycling the blade draw type.")]
         private Key _drawTypeKey = Key.F3;
@@ -92,6 +103,12 @@ namespace Scatter.Rendering.Spike
 
         [SerializeField, Tooltip("Key switching the draw backend.")]
         private Key _backendKey = Key.F9;
+
+        [SerializeField, Tooltip("Key cycling the density falloff: off, on, on with widening.")]
+        private Key _densityFalloffKey = Key.F11;
+
+        [SerializeField, Tooltip("Key cycling the blade shadow caster presets.")]
+        private Key _shadowCastersKey = Key.F12;
 #endif
 
         private readonly StringBuilder _status = new StringBuilder(256);
@@ -147,6 +164,9 @@ namespace Scatter.Rendering.Spike
             config.BladeDrawType = _bladeDrawType;
             config.OffsetMode = _offsetMode;
             config.Backend = _backend;
+            config.DensityFalloff = _densityFalloff;
+            config.WidenMaxFactor = _widenMaxFactor;
+            config.ShadowCasters = _shadowCasters;
             _system = new ScatterSpikeSystem(_resources, config);
             _passTimings = new UrpPassTimings();
             Shader.SetGlobalFloat(s_DebugView, 0f);
@@ -255,6 +275,18 @@ namespace Scatter.Rendering.Spike
                 changed = true;
             }
 
+            if (keyboard[_densityFalloffKey].wasPressedThisFrame)
+            {
+                _system.SetDensityFalloff((SpikeDensityFalloff)(((int)_system.Config.DensityFalloff + 1) % 3));
+                changed = true;
+            }
+
+            if (keyboard[_shadowCastersKey].wasPressedThisFrame)
+            {
+                _system.SetShadowCasters((SpikeShadowCasters)(((int)_system.Config.ShadowCasters + 1) % SpikeShadowCasterMask.PresetCount));
+                changed = true;
+            }
+
             if (keyboard[_debugViewKey].wasPressedThisFrame)
             {
                 _debugView = (SpikeDebugView)(((int)_debugView + 1) % 6);
@@ -307,6 +339,14 @@ namespace Scatter.Rendering.Spike
             _status.Append("\n  [F5] blades ").Append(config.BladeCount);
             _status.Append("  [F7] objects ").Append(config.ObjectsEnabled ? config.ObjectCount : 0);
             _status.Append("  [F8] view ").Append(_debugView);
+            AppendFalloff(config);
+            _status.Append("\n  [F12] casters ").Append(config.ShadowCasters);
+            if (config.Backend == SpikeBackend.Indirect && config.ShadowCasters != SpikeShadowCasters.AllLodsAllCascades
+                && config.ShadowCasters != SpikeShadowCasters.None)
+            {
+                _status.Append(" (Indirect: every cascade)");
+            }
+
             _status.Append("\n  visible LOD0 ").Append(_system.GetCounter(ScatterSpikeSystem.BladeLod0Region));
             _status.Append("  LOD1 ").Append(_system.GetCounter(ScatterSpikeSystem.BladeLod1Region));
             _status.Append("  objects ").Append(_system.GetCounter(ScatterSpikeSystem.ObjectRegion));
@@ -318,6 +358,26 @@ namespace Scatter.Rendering.Spike
             }
 
             _hud.StatusText = _status.ToString();
+        }
+
+        private void AppendFalloff(in ScatterSpikeConfig config)
+        {
+            _status.Append("\n  [F11] density ").Append(config.DensityFalloff);
+            if (config.DensityFalloff == SpikeDensityFalloff.Off)
+            {
+                return;
+            }
+
+            SpikeDensityCurve curve = config.DensityCurve;
+            _status.Append(" (100% < ").Append(curve.NearDistanceMeters).Append(" m, ")
+                .Append(curve.MidDensity * 100f).Append("% at ").Append(curve.MidDistanceMeters).Append(" m, ")
+                .Append(curve.FarDensity * 100f).Append("% at ").Append(curve.FarDistanceMeters).Append(" m");
+            if (config.DensityFalloff == SpikeDensityFalloff.OnWiden)
+            {
+                _status.Append(", width x").Append(config.WidenMaxFactor).Append(" max");
+            }
+
+            _status.Append(')');
         }
     }
 }

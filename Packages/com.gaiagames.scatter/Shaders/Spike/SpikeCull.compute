@@ -9,6 +9,7 @@
 
 #include "SpikeCommon.hlsl"
 #include "SpikeDrawDescriptor.hlsl"
+#include "SpikeDensity.hlsl"
 
 // R2 sequence (M. Roberts, 2018) in 32-bit fixed point: frac(i * alpha) is exact with wrapping uint maths,
 // where float maths would lose the fraction for millions of instances. Any prefix is evenly spread.
@@ -44,6 +45,7 @@ float _SpikeMaxDistanceMeters;
 float _SpikeBoundingRadiusMeters;
 uint _SpikeLod0Region;
 uint _SpikeLod1Region;
+uint _SpikeDensityFalloff; // 1: keep an instance when its rank is below the density at its distance (Phase 1b)
 
 // Draw arguments.
 StructuredBuffer<SpikeDrawDescriptor> _SpikeDraws;
@@ -115,7 +117,10 @@ void CullSpikeInstances(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIn
     {
         float3 position = _SpikeInstances[index].xyz;
         float distanceMeters = distance(position, _SpikeCameraPosition.xyz);
-        if (distanceMeters < _SpikeMaxDistanceMeters && IsInFrustum(position, _SpikeBoundingRadiusMeters))
+        // Design 5.2: rank = place in the R2 order (any prefix is evenly spread); keep the blades with rank < density.
+        float rank = (float)index / (float)_SpikeInstanceCount;
+        bool kept = _SpikeDensityFalloff == 0u || rank < SpikeDensityAtDistance(distanceMeters);
+        if (kept && distanceMeters < _SpikeMaxDistanceMeters && IsInFrustum(position, _SpikeBoundingRadiusMeters))
         {
             lod = distanceMeters < _SpikeLod1DistanceMeters ? 0 : 1;
             InterlockedAdd(gs_LodCount[lod], 1u, slotInGroup);

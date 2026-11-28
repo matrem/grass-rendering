@@ -14,13 +14,17 @@ namespace Scatter.Rendering.Spike
         /// <summary>Radius of the sphere tested against the frustum around each instance position.</summary>
         public float BoundingRadiusMeters;
 
-        public SpikeCullLayer(int lod0Region, int lod1Region, float lod1DistanceMeters, float maxDistanceMeters, float boundingRadiusMeters)
+        /// <summary>Keep an instance only when its rank (index / count) is below the density at its distance (Phase 1b).</summary>
+        public bool DensityFalloff;
+
+        public SpikeCullLayer(int lod0Region, int lod1Region, float lod1DistanceMeters, float maxDistanceMeters, float boundingRadiusMeters, bool densityFalloff = false)
         {
             Lod0Region = lod0Region;
             Lod1Region = lod1Region;
             Lod1DistanceMeters = lod1DistanceMeters;
             MaxDistanceMeters = maxDistanceMeters;
             BoundingRadiusMeters = boundingRadiusMeters;
+            DensityFalloff = densityFalloff;
         }
     }
 }

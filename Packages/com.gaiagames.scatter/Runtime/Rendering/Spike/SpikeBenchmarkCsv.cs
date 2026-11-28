@@ -12,7 +12,8 @@ namespace Scatter.Rendering.Spike
     {
         public static void Write(TextWriter writer, SpikeBenchmarkResult[] results, int count, string gpu, string graphicsApi, int width, int height)
         {
-            writer.Write("view,scatter,backend,drawType,bladeCount,K,visibleBlades,visibleObjects,overflow");
+            writer.Write("view,scatter,backend,drawType,bladeCount,K,renderScale,shadowResolution,densityFalloff,shadowCasters,"
+                + "visibleBlades,visibleLod0,visibleLod1,visibleObjects,overflow");
             string[] metrics = Enum.GetNames(typeof(SpikeBenchmarkMetric));
             for (int m = 0; m < metrics.Length; m++)
             {
@@ -31,7 +32,11 @@ namespace Scatter.Rendering.Spike
                 writer.Write(benchmarkCase.ScatterEnabled ? benchmarkCase.DrawType.ToString() : string.Empty);
                 writer.Write("," + Format(benchmarkCase.ScatterEnabled ? benchmarkCase.BladeCount : 0));
                 writer.Write("," + Format(benchmarkCase.BladesPerInstance));
-                writer.Write("," + Format(result.VisibleBlades) + "," + Format(result.VisibleObjects) + "," + Format(result.Overflow));
+                writer.Write("," + Format(result.RenderScale) + "," + (result.ShadowResolution > 0 ? Format(result.ShadowResolution) : string.Empty));
+                writer.Write("," + (benchmarkCase.ScatterEnabled ? benchmarkCase.DensityFalloff.ToString() : string.Empty));
+                writer.Write("," + (benchmarkCase.ScatterEnabled ? benchmarkCase.ShadowCasters.ToString() : string.Empty));
+                writer.Write("," + Format(result.VisibleBlades) + "," + Format(result.VisibleLod0) + "," + Format(result.VisibleLod1));
+                writer.Write("," + Format(result.VisibleObjects) + "," + Format(result.Overflow));
                 for (int m = 0; m < SpikeBenchmarkResult.MetricCount; m++)
                 {
                     writer.Write("," + Format(result.MedianMs[m]) + "," + Format(result.Percentile99Ms[m]));

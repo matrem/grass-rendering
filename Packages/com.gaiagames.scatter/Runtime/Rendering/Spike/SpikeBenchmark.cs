@@ -10,9 +10,9 @@ using UnityEngine.InputSystem;
 namespace Scatter.Rendering.Spike
 {
     /// <summary>
-    /// Phase 1 benchmark (S3) in the spike scene: runs the cases of a <see cref="SpikeBenchmarkMode"/> from fixed camera
-    /// views and writes a CSV to persistentDataPath/ScatterLogs. Starts with a command line flag (then quits when
-    /// done) or with F10 (full run). Runs before <see cref="ScatterSpike"/> each frame, so the case settings and the
+    /// Spike benchmark (Phase 1 S3, Phase 1b) in the spike scene: runs the cases of a <see cref="SpikeBenchmarkMode"/>
+    /// from fixed camera views and writes a CSV to persistentDataPath/ScatterLogs. Starts with a command line flag (then
+    /// quits when done) or with F10 (full run). Render scale and shadow map resolution changes are undone at the end. Runs before <see cref="ScatterSpike"/> each frame, so the case settings and the
     /// camera view apply to the same frame's cull. If the player quits before the end, the finished cases are written.
     /// The work is done by <see cref="SpikeBenchmarkRunner"/>.
     /// </summary>
@@ -22,6 +22,15 @@ namespace Scatter.Rendering.Spike
     {
         public const string FullFlag = "-spikeBenchmark";
         public const string QuickFlag = "-spikeBenchmarkQuick";
+
+        /// <summary>Phase 1b item 1: render scale x shadow map resolution x blade count.</summary>
+        public const string ResolutionFlag = "-spikeBenchmarkResolution";
+
+        /// <summary>Phase 1b items 2 and 3: density falloff x widening x shadow caster preset.</summary>
+        public const string LeversFlag = "-spikeBenchmarkLevers";
+
+        /// <summary>Added to a benchmark flag: the Object layer (rocks) is off for the whole run (blades only). CSV name ends in _noobjects.</summary>
+        public const string NoObjectsFlag = "-spikeBenchmarkNoObjects";
 
         /// <summary>Runs <see cref="GpuMarkerProbe"/> on the first view and quits: which GPU markers the build can time.</summary>
         public const string ProbeFlag = "-spikeTimingProbe";
@@ -58,6 +67,19 @@ namespace Scatter.Rendering.Spike
         [SerializeField, Min(1), Tooltip("Blade count of the K sweep.")]
         private int _sweepBladeCount = 1 << 22;
 
+        [Header("Phase 1b cases")]
+        [SerializeField, Tooltip("Blade counts of the resolution run (procedural indexed, BRG).")]
+        private int[] _resolutionBladeCounts = { 1 << 20, 1 << 22 };
+
+        [SerializeField, Tooltip("URP render scales of the resolution run.")]
+        private float[] _renderScales = { 1f, 0.5f, 0.25f };
+
+        [SerializeField, Tooltip("Main light shadow map resolutions of the resolution run (texels per side).")]
+        private int[] _shadowResolutions = { 2048, 512 };
+
+        [SerializeField, Min(1), Tooltip("Blade count of the levers run (density falloff, shadow casters).")]
+        private int _leversBladeCount = 1 << 22;
+
         [Header("Frames")]
         [SerializeField, Min(0), Tooltip("Frames ignored after each case change (GPU timings arrive a few frames late).")]
         private int _warmupFrames = 60;
@@ -73,6 +95,9 @@ namespace Scatter.Rendering.Spike
         private FrameStatsSampler _sampler;
         private SpikeBenchmarkRunner _runner;
         private SpikeBenchmarkMode _mode;
+        private SpikeUrpSettings _urpSettings;
+        private bool _objectsEnabled = true;
+        private bool _objectsEnabledBefore;
         private bool _quitWhenDone;
         private bool _probing;
         private int _probeStartFrame;
@@ -108,13 +133,21 @@ namespace Scatter.Rendering.Spike
                     warmupFrames = QuickWarmupFrames;
                     measureFrames = QuickMeasureFrames;
                     break;
+                case SpikeBenchmarkMode.Resolution:
+                    cases = SpikeBenchmarkPlan.CreateResolution(views.Length, _resolutionBladeCounts, _defaultBladesPerInstance, _renderScales, _shadowResolutions);
+                    break;
+                case SpikeBenchmarkMode.Levers:
+                    cases = SpikeBenchmarkPlan.CreateLevers(views.Length, _leversBladeCount, _defaultBladesPerInstance);
+                    break;
                 default:
                     cases = SpikeBenchmarkPlan.Create(views.Length, _bladeCounts, _defaultBladesPerInstance, _bladesPerInstanceSweep, _sweepBladeCount);
                     break;
             }
 
             _mode = mode;
-            _runner = new SpikeBenchmarkRunner(_spike.System, _spike.CullCamera.transform, cases, views, warmupFrames, measureFrames);
+            _urpSettings = SpikeUrpSettings.ForActivePipeline();
+            _objectsEnabledBefore = _spike.System.Config.ObjectsEnabled;
+            _runner = new SpikeBenchmarkRunner(_spike.System, _spike.CullCamera.transform, cases, views, warmupFrames, measureFrames, _urpSettings, _objectsEnabled);
             _sampler = new FrameStatsSampler(measureFrames);
             _spike.ForceStatsReadback = true;
             if (_hud != null)
@@ -122,12 +155,13 @@ namespace Scatter.Rendering.Spike
                 _hud.Visible = false;
             }
 
-            Debug.Log($"Spike benchmark {mode}: {cases.Length} cases, {warmupFrames} + {measureFrames} frames each, {Screen.width}x{Screen.height}.");
+            Debug.Log($"Spike benchmark {mode}: {cases.Length} cases, {warmupFrames} + {measureFrames} frames each, {Screen.width}x{Screen.height}, objects {(_objectsEnabled ? "on" : "off")}.");
         }
 
         private void Start()
         {
             string[] arguments = Environment.GetCommandLineArgs();
+            _objectsEnabled = Array.IndexOf(arguments, NoObjectsFlag) < 0;
             if (Array.IndexOf(arguments, ProbeFlag) >= 0)
             {
                 // GPU marker probe (GpuMarkerProbe): first view, default settings, then quits.
@@ -148,10 +182,21 @@ namespace Scatter.Rendering.Spike
                 _quitWhenDone = true;
                 StartBenchmark(SpikeBenchmarkMode.Full);
             }
+            else if (Array.IndexOf(arguments, ResolutionFlag) >= 0)
+            {
+                _quitWhenDone = true;
+                StartBenchmark(SpikeBenchmarkMode.Resolution);
+            }
+            else if (Array.IndexOf(arguments, LeversFlag) >= 0)
+            {
+                _quitWhenDone = true;
+                StartBenchmark(SpikeBenchmarkMode.Levers);
+            }
         }
 
         private void OnDisable()
         {
+            RestoreUrpSettings();
             _probe?.Dispose();
             _probe = null;
             _sampler?.Dispose();
@@ -224,7 +269,7 @@ namespace Scatter.Rendering.Spike
         /// <summary>Writes the first <paramref name="caseCount"/> results. Allocates: end of a run only.</summary>
         private void WriteCsv(int caseCount, string suffix)
         {
-            string fileName = "spike_benchmark_" + _mode.ToString().ToLowerInvariant() + suffix + "_"
+            string fileName = "spike_benchmark_" + _mode.ToString().ToLowerInvariant() + (_objectsEnabled ? string.Empty : "_noobjects") + suffix + "_"
                 + DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture) + ".csv";
             string folder = Path.Combine(Application.persistentDataPath, CsvFolderName);
             Directory.CreateDirectory(folder);
@@ -245,12 +290,23 @@ namespace Scatter.Rendering.Spike
             {
                 WriteCsv(Mathf.Min(_runner.CaseIndex, _runner.CaseCount), "_partial");
             }
+
+            RestoreUrpSettings();
+        }
+
+        /// <summary>In the Editor the runs change the project URP asset itself: always put its values back.</summary>
+        private void RestoreUrpSettings()
+        {
+            _urpSettings?.Restore();
+            _urpSettings = null;
         }
 
         private void Finish()
         {
+            RestoreUrpSettings();
             WriteCsv(_runner.CaseCount, string.Empty);
             _runner = null;
+            _spike.System.SetObjectsEnabled(_objectsEnabledBefore);
             _sampler.Dispose();
             _sampler = null;
             _spike.ForceStatsReadback = false;

@@ -18,12 +18,21 @@ namespace Scatter.Rendering.Spike
         private readonly int _warmupFrames;
         private readonly int _measureFrames;
         private readonly SpikeBenchmarkRecorder _recorder;
+        private readonly SpikeUrpSettings _urpSettings;
+        private readonly bool _objectsEnabled;
         private int _caseIndex = -1;
         private int _frame;
 
-        public SpikeBenchmarkRunner(ScatterSpikeSystem system, Transform camera, SpikeBenchmarkCase[] cases, Pose[] views, int warmupFrames, int measureFrames)
+        /// <param name="urpSettings">Applies the render scale and shadow map resolution of each case; null: not changed.
+        /// The caller restores the original values at the end.</param>
+        /// <param name="objectsEnabled">Object layer (rocks) on or off in every case. Off (Phase 1b): blades only.
+        /// The caller restores the system setting at the end.</param>
+        public SpikeBenchmarkRunner(ScatterSpikeSystem system, Transform camera, SpikeBenchmarkCase[] cases, Pose[] views, int warmupFrames, int measureFrames,
+            SpikeUrpSettings urpSettings = null, bool objectsEnabled = true)
         {
             _system = system;
+            _urpSettings = urpSettings;
+            _objectsEnabled = objectsEnabled;
             _camera = camera;
             _cases = cases;
             _views = views;
@@ -101,7 +110,9 @@ namespace Scatter.Rendering.Spike
             _recorder.Summarize(result);
             if (result.Case.ScatterEnabled)
             {
-                result.VisibleBlades = _system.GetCounter(ScatterSpikeSystem.BladeLod0Region) + _system.GetCounter(ScatterSpikeSystem.BladeLod1Region);
+                result.VisibleLod0 = _system.GetCounter(ScatterSpikeSystem.BladeLod0Region);
+                result.VisibleLod1 = _system.GetCounter(ScatterSpikeSystem.BladeLod1Region);
+                result.VisibleBlades = result.VisibleLod0 + result.VisibleLod1;
                 result.VisibleObjects = _system.GetCounter(ScatterSpikeSystem.ObjectRegion);
                 result.Overflow = _system.GetCounter(_system.Culler.OverflowCounterIndex);
             }
@@ -118,16 +129,30 @@ namespace Scatter.Rendering.Spike
             }
 
             SpikeBenchmarkCase benchmarkCase = _cases[index];
+            if (_system.Config.ObjectsEnabled != _objectsEnabled)
+            {
+                _system.SetObjectsEnabled(_objectsEnabled);
+            }
+
             _system.SetScatterEnabled(benchmarkCase.ScatterEnabled);
             if (benchmarkCase.ScatterEnabled)
             {
                 _system.SetBackend(benchmarkCase.Backend);
                 _system.SetBladeDrawType(benchmarkCase.DrawType);
                 _system.SetBladeCount(benchmarkCase.BladeCount);
+                _system.SetDensityFalloff(benchmarkCase.DensityFalloff);
+                _system.SetShadowCasters(benchmarkCase.ShadowCasters);
                 if (benchmarkCase.DrawType == SpikeDrawType.ProceduralIndexedIndirect && _system.Config.BladesPerInstance != benchmarkCase.BladesPerInstance)
                 {
                     _system.SetBladesPerInstance(benchmarkCase.BladesPerInstance);
                 }
+            }
+
+            if (_urpSettings != null)
+            {
+                _urpSettings.Apply(benchmarkCase.RenderScale, benchmarkCase.ShadowResolution);
+                Results[index].RenderScale = _urpSettings.RenderScale;
+                Results[index].ShadowResolution = _urpSettings.ShadowResolution;
             }
 
             ApplyView(benchmarkCase.View);

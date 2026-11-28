@@ -43,6 +43,9 @@ namespace Scatter.Rendering.Spike
         private static readonly int s_Indexed = Shader.PropertyToID("_Indexed");
         private static readonly int s_RegionStart = Shader.PropertyToID("_RegionStart");
         private static readonly int s_DebugColor = Shader.PropertyToID("_DebugColor");
+        private static readonly int s_DensityDistances = Shader.PropertyToID("_SpikeDensityDistances");
+        private static readonly int s_DensityValues = Shader.PropertyToID("_SpikeDensityValues");
+        private static readonly int s_CullCameraPosition = Shader.PropertyToID("_SpikeCullCameraPosition");
 
         // Debug view colours per draw (design 12.2): one hue per draw type, lighter for LOD1.
         private static readonly Color[] s_DebugColors =
@@ -87,6 +90,7 @@ namespace Scatter.Rendering.Spike
             capacities[BladeLod1Region] = _config.MaxBladeCount;
             capacities[ObjectRegion] = _config.ObjectCount;
             _culler = new SpikeCuller(resources.CullCompute, capacities, DrawCount);
+            _culler.SetDensityCurve(_config.DensityCurve);
 
             _blades = new SpikeInstanceSet("Scatter Spike Blades", _config.MaxBladeCount);
             _objects = new SpikeInstanceSet("Scatter Spike Objects", _config.ObjectCount);
@@ -114,6 +118,7 @@ namespace Scatter.Rendering.Spike
             _culler.SetDraws(_drawDescriptors, DrawCount);
 
             ApplyDrawSelection();
+            ApplyShadowCasters();
             _counterReadback = new NativeArray<uint>(RegionCount + 1, Allocator.Persistent);
             _counters = new NativeArray<uint>(RegionCount + 1, Allocator.Persistent);
             _onCountersRead = OnCountersRead;
@@ -181,6 +186,22 @@ namespace Scatter.Rendering.Spike
             _brg.OffsetMode = mode;
         }
 
+        /// <summary>Phase 1b: density falloff of the blades, with or without widening.</summary>
+        public void SetDensityFalloff(SpikeDensityFalloff falloff)
+        {
+            _config.DensityFalloff = falloff;
+        }
+
+        /// <summary>
+        /// Phase 1b: which blade LODs cast shadows, into which cascades. The Indirect backend cannot limit the cascades:
+        /// a LOD that casts casts in every cascade.
+        /// </summary>
+        public void SetShadowCasters(SpikeShadowCasters casters)
+        {
+            _config.ShadowCasters = casters;
+            ApplyShadowCasters();
+        }
+
         public void SetBladeCount(int count)
         {
             _config.BladeCount = Mathf.Clamp(count, 0, _config.MaxBladeCount);
@@ -214,15 +235,23 @@ namespace Scatter.Rendering.Spike
                 return;
             }
 
+            Vector3 cameraPosition = camera.transform.position;
             GeometryUtility.CalculateFrustumPlanes(camera, _frustumPlanes);
-            _culler.SetView(camera.transform.position, _frustumPlanes);
+            _culler.SetView(cameraPosition, _frustumPlanes);
+
+            // Blade shaders: widening by the density at the distance to the cull camera (Phase 1b), in every pass.
+            bool falloff = _config.DensityFalloff != SpikeDensityFalloff.Off;
+            float widenMaxFactor = _config.DensityFalloff == SpikeDensityFalloff.OnWiden ? _config.WidenMaxFactor : 1f;
+            Shader.SetGlobalVector(s_DensityDistances, _config.DensityCurve.ToDistancesVector());
+            Shader.SetGlobalVector(s_DensityValues, _config.DensityCurve.ToValuesVector(widenMaxFactor));
+            Shader.SetGlobalVector(s_CullCameraPosition, cameraPosition);
 
             _cmd.Clear();
             using (new ProfilingScope(_cmd, s_CullSampler))
             {
                 _culler.RecordReset(_cmd);
                 _culler.RecordCull(_cmd, _blades, _config.BladeCount, new SpikeCullLayer(BladeLod0Region, BladeLod1Region,
-                    _config.Lod1DistanceMeters, _config.MaxDistanceMeters, BladeBoundingRadiusMeters));
+                    _config.Lod1DistanceMeters, _config.MaxDistanceMeters, BladeBoundingRadiusMeters, falloff));
                 if (_config.ObjectsEnabled)
                 {
                     _culler.RecordCull(_cmd, _objects, _config.ObjectCount, new SpikeCullLayer(ObjectRegion, ObjectRegion,
@@ -312,7 +341,7 @@ namespace Scatter.Rendering.Spike
                 material.SetFloat(s_Indexed, type == SpikeDrawType.ProceduralIndexedIndirect ? 1f : 0f);
 
                 AddDraw(type, material, type == SpikeDrawType.MeshIndirect ? _bladeMeshes[lod] : null,
-                    type == SpikeDrawType.ProceduralIndexedIndirect ? _multiBladeIndexBuffers[lod] : null, region, draw);
+                    type == SpikeDrawType.ProceduralIndexedIndirect ? _multiBladeIndexBuffers[lod] : null, region, draw, true, lod);
             }
         }
 
@@ -321,11 +350,11 @@ namespace Scatter.Rendering.Spike
             Mesh mesh = resources.ObjectMesh;
             _drawDescriptors[ObjectDraw] = new SpikeDrawDescriptor(ObjectRegion, SpikeDrawType.MeshIndirect, (int)mesh.GetIndexCount(0), 1);
             Material material = CreateMaterial(resources.ObjectShader, ObjectDraw, _objects, ObjectRegion);
-            AddDraw(SpikeDrawType.MeshIndirect, material, mesh, null, ObjectRegion, ObjectDraw);
+            AddDraw(SpikeDrawType.MeshIndirect, material, mesh, null, ObjectRegion, ObjectDraw, false, 0);
         }
 
         /// <summary>Adds the same draw to both backends: draw indices match <see cref="GetDrawIndex"/> in both.</summary>
-        private void AddDraw(SpikeDrawType type, Material material, Mesh mesh, GraphicsBuffer indexBuffer, int region, int draw)
+        private void AddDraw(SpikeDrawType type, Material material, Mesh mesh, GraphicsBuffer indexBuffer, int region, int draw, bool isBlade, int lod)
         {
             _brg.AddDraw(new SpikeBrgDraw
             {
@@ -336,6 +365,8 @@ namespace Scatter.Rendering.Spike
                 Region = region,
                 ArgsDraw = draw,
                 CastShadows = true,
+                IsBlade = isBlade,
+                Lod = lod,
             });
             _indirect.AddDraw(new SpikeIndirectDraw
             {
@@ -369,6 +400,19 @@ namespace Scatter.Rendering.Spike
                     : _drawDescriptors[draw].DrawType == (uint)_config.BladeDrawType);
                 _brg.SetDrawEnabled(draw, selected && brg);
                 _indirect.SetDrawEnabled(draw, selected && !brg);
+            }
+        }
+
+        private void ApplyShadowCasters()
+        {
+            _brg.ShadowCasters = _config.ShadowCasters;
+            for (int draw = 0; draw < DrawCount; draw++)
+            {
+                if (draw != ObjectDraw)
+                {
+                    int lod = draw % LodCount; // GetDrawIndex: type x LodCount + lod
+                    _indirect.SetDrawCastShadows(draw, SpikeShadowCasterMask.Casts(_config.ShadowCasters, lod));
+                }
             }
         }
 

@@ -19,6 +19,15 @@ namespace Scatter.Rendering.Spike
         /// <summary>Visible blades (LOD0 + LOD1 entries requested by the cull), from the debug readback.</summary>
         public uint VisibleBlades;
 
+        public uint VisibleLod0;
+        public uint VisibleLod1;
+
+        /// <summary>URP render scale applied during the case; NaN without URP.</summary>
+        public float RenderScale = float.NaN;
+
+        /// <summary>Main light shadow map resolution applied during the case; 0 without URP.</summary>
+        public int ShadowResolution;
+
         public uint VisibleObjects;
 
         /// <summary>Entries skipped by visible list overflow; must be 0.</summary>

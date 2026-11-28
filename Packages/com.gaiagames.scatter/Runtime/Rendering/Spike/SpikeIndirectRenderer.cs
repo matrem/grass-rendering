@@ -40,6 +40,17 @@ namespace Scatter.Rendering.Spike
             return _draws[draw].Enabled;
         }
 
+        /// <summary>Shadow casting of one draw: in every cascade or none (RenderParams cannot limit the cascades).</summary>
+        public void SetDrawCastShadows(int draw, bool castShadows)
+        {
+            _draws[draw].CastShadows = castShadows;
+        }
+
+        public bool DoesDrawCastShadows(int draw)
+        {
+            return _draws[draw].CastShadows;
+        }
+
         /// <summary>
         /// Queues the enabled draws for every camera of this frame. Call once per frame, after the cull was recorded.
         /// <paramref name="worldBounds"/> is only used by Unity to cull the whole draw; the cull compute does the real work.

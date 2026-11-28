@@ -121,6 +121,52 @@ namespace Scatter.Tests.Rendering.Spike
             Assert.That(commands.proceduralIndirectDrawCommands[1].indexBufferHandle, Is.EqualTo(_indexBuffer.bufferHandle));
         }
 
+        [TestCase(SpikeShadowCasters.AllLodsAllCascades, 0b1111, 0b1111)]
+        [TestCase(SpikeShadowCasters.Lod0AllCascades, 0b1111, 0)]
+        [TestCase(SpikeShadowCasters.Lod0FirstTwoCascades, 0b0011, 0)]
+        [TestCase(SpikeShadowCasters.Lod0FirstCascade, 0b0001, 0)]
+        [TestCase(SpikeShadowCasters.None, 0, 0)]
+        public void ShadowView_BladeDrawsFollowTheCasterPreset_ObjectsCastEverywhere(SpikeShadowCasters casters, int lod0Mask, int lod1Mask)
+        {
+            // Blade LOD0 (mesh), blade LOD1 (procedural), object (mesh): all casters.
+            var renderer = new SpikeBrgRenderer(_culler, new Bounds(Vector3.zero, Vector3.one * 100f), 3) { ShadowCasters = casters };
+            try
+            {
+                BatchMaterialID material = renderer.RegisterMaterial(_material);
+                BatchMeshID mesh = renderer.RegisterMesh(_mesh);
+                renderer.AddDraw(new SpikeBrgDraw { Type = SpikeDrawType.MeshIndirect, Material = material, Mesh = mesh, Region = 0, ArgsDraw = 0, CastShadows = true, Enabled = true, IsBlade = true, Lod = 0 });
+                renderer.AddDraw(new SpikeBrgDraw { Type = SpikeDrawType.ProceduralIndirect, Material = material, Region = 1, ArgsDraw = 1, CastShadows = true, Enabled = true, IsBlade = true, Lod = 1 });
+                renderer.AddDraw(new SpikeBrgDraw { Type = SpikeDrawType.MeshIndirect, Material = material, Mesh = mesh, Region = 1, ArgsDraw = 2, CastShadows = true, Enabled = true });
+
+                renderer.WriteDrawCommands(BatchCullingViewType.Light, 4, _output);
+
+                BatchCullingOutputDrawCommands commands = _output[0];
+                int expectedIndirect = (lod0Mask != 0 ? 1 : 0) + 1;
+                Assert.That(commands.indirectDrawCommandCount, Is.EqualTo(expectedIndirect));
+                Assert.That(commands.proceduralIndirectDrawCommandCount, Is.EqualTo(lod1Mask != 0 ? 1 : 0));
+                if (lod0Mask != 0)
+                {
+                    Assert.That(commands.indirectDrawCommands[0].splitVisibilityMask, Is.EqualTo((ushort)lod0Mask), "Blade LOD0.");
+                }
+
+                if (lod1Mask != 0)
+                {
+                    Assert.That(commands.proceduralIndirectDrawCommands[0].splitVisibilityMask, Is.EqualTo((ushort)lod1Mask), "Blade LOD1.");
+                }
+
+                Assert.That(commands.indirectDrawCommands[expectedIndirect - 1].splitVisibilityMask, Is.EqualTo((ushort)0b1111), "Objects.");
+                Assert.That(commands.indirectDrawCommands[expectedIndirect - 1].indirectArgsBufferOffset, Is.EqualTo((uint)SpikeCuller.GetArgsOffsetBytes(2)));
+
+                SpikeBrgRenderer.FreeDrawCommands(_output);
+                renderer.WriteDrawCommands(BatchCullingViewType.Camera, 1, _output);
+                Assert.That(_output[0].indirectDrawCommandCount + _output[0].proceduralIndirectDrawCommandCount, Is.EqualTo(3), "The camera draws every blade LOD.");
+            }
+            finally
+            {
+                renderer.Dispose();
+            }
+        }
+
         [Test]
         public void WriteDrawCommands_DoesNotAllocate()
         {
@@ -132,6 +178,13 @@ namespace Scatter.Tests.Rendering.Spike
                 _renderer.WriteDrawCommands(BatchCullingViewType.Light, 4, _output);
                 SpikeBrgRenderer.FreeDrawCommands(_output);
             }, Is.Not.AllocatingGCMemory());
+
+            _renderer.ShadowCasters = SpikeShadowCasters.Lod0FirstTwoCascades;
+            Assert.That(() =>
+            {
+                _renderer.WriteDrawCommands(BatchCullingViewType.Light, 4, _output);
+                SpikeBrgRenderer.FreeDrawCommands(_output);
+            }, Is.Not.AllocatingGCMemory(), "With a caster preset.");
         }
     }
 }

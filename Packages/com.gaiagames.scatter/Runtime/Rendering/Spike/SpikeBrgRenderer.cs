@@ -49,6 +49,9 @@ namespace Scatter.Rendering.Spike
 
         public SpikeRegionOffsetMode OffsetMode { get; set; }
 
+        /// <summary>Shadow cascades of the blade draws (Phase 1b, design 6.2).</summary>
+        public SpikeShadowCasters ShadowCasters { get; set; }
+
         public int DrawCount => _drawCount;
 
         public BatchMeshID RegisterMesh(Mesh mesh)
@@ -105,7 +108,7 @@ namespace Scatter.Rendering.Spike
                 return;
             }
 
-            CountDraws(isShadowView, out int indirectCount, out int proceduralCount);
+            CountDraws(isShadowView, splitCount, out int indirectCount, out int proceduralCount);
             int rangeCount = (indirectCount > 0 ? 1 : 0) + (proceduralCount > 0 ? 1 : 0);
             var commands = new BatchCullingOutputDrawCommands
             {
@@ -117,14 +120,13 @@ namespace Scatter.Rendering.Spike
                 drawRanges = Malloc<BatchDrawRange>(rangeCount),
             };
 
-            // Shadow views: one command visible in every split (cascade). Design 6.2 limits this to the first cascades later.
-            var splitMask = (ushort)((1 << Mathf.Max(splitCount, 1)) - 1);
             int indirectIndex = 0;
             int proceduralIndex = 0;
             for (int i = 0; i < _drawCount; i++)
             {
                 ref SpikeBrgDraw draw = ref _draws[i];
-                if (!draw.Enabled || (isShadowView && !draw.CastShadows))
+                ushort splitMask = GetSplitMask(ref draw, isShadowView, splitCount);
+                if (splitMask == 0)
                 {
                     continue;
                 }
@@ -208,14 +210,40 @@ namespace Scatter.Rendering.Spike
             return default;
         }
 
-        private void CountDraws(bool isShadowView, out int indirectCount, out int proceduralCount)
+        /// <summary>
+        /// Splits the draw is visible in; 0 = not submitted. Camera: the single split. Shadow views: every split
+        /// (cascade) for casters, except blade draws, which follow <see cref="ShadowCasters"/> (design 6.2).
+        /// </summary>
+        private ushort GetSplitMask(ref SpikeBrgDraw draw, bool isShadowView, int splitCount)
+        {
+            if (!draw.Enabled)
+            {
+                return 0;
+            }
+
+            if (!isShadowView)
+            {
+                return SpikeShadowCasterMask.FirstSplits(Mathf.Max(splitCount, 1));
+            }
+
+            if (!draw.CastShadows)
+            {
+                return 0;
+            }
+
+            return draw.IsBlade
+                ? SpikeShadowCasterMask.GetSplitMask(ShadowCasters, draw.Lod, splitCount)
+                : SpikeShadowCasterMask.FirstSplits(Mathf.Max(splitCount, 1));
+        }
+
+        private void CountDraws(bool isShadowView, int splitCount, out int indirectCount, out int proceduralCount)
         {
             indirectCount = 0;
             proceduralCount = 0;
             for (int i = 0; i < _drawCount; i++)
             {
                 ref SpikeBrgDraw draw = ref _draws[i];
-                if (!draw.Enabled || (isShadowView && !draw.CastShadows))
+                if (GetSplitMask(ref draw, isShadowView, splitCount) == 0)
                 {
                     continue;
                 }

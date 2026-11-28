@@ -79,6 +79,59 @@ namespace Scatter.Tests.Rendering.Spike
         }
 
         [Test]
+        public void Tick_WithDensityFalloff_KeepsFewerBlades_InBothLods()
+        {
+            _system.Tick(_camera, false);
+            uint[] without = ReadCounters();
+            _system.SetDensityFalloff(SpikeDensityFalloff.On);
+            _system.Tick(_camera, false);
+            uint[] with = ReadCounters();
+
+            // LOD0 ends at 20 m, inside the full density range (30 m): every LOD0 blade is kept. LOD1 (20 to 120 m) is thinned.
+            Assert.That(with[ScatterSpikeSystem.BladeLod0Region], Is.GreaterThan(0u));
+            Assert.That(with[ScatterSpikeSystem.BladeLod0Region], Is.EqualTo(without[ScatterSpikeSystem.BladeLod0Region]), "Near blades kept.");
+            Assert.That(with[ScatterSpikeSystem.BladeLod1Region], Is.GreaterThan(0u));
+            Assert.That(with[ScatterSpikeSystem.BladeLod1Region], Is.LessThan(without[ScatterSpikeSystem.BladeLod1Region] * 3 / 4), "Far blades thinned.");
+            Assert.That(with[ScatterSpikeSystem.ObjectRegion], Is.EqualTo(without[ScatterSpikeSystem.ObjectRegion]), "Objects are not thinned.");
+        }
+
+        [TestCase(SpikeDensityFalloff.On, SpikeShadowCasters.Lod0FirstCascade)]
+        [TestCase(SpikeDensityFalloff.OnWiden, SpikeShadowCasters.Lod0FirstTwoCascades)]
+        public void Tick_WithPhase1bSettings_DoesNotAllocate(SpikeDensityFalloff falloff, SpikeShadowCasters casters)
+        {
+            _system.SetDensityFalloff(falloff);
+            _system.SetShadowCasters(casters);
+            _system.Tick(_camera, false);
+            _system.Tick(_camera, false);
+
+            Assert.That(() => _system.Tick(_camera, false), Is.Not.AllocatingGCMemory());
+            Assert.That(_system.Config.DensityFalloff, Is.EqualTo(falloff));
+            Assert.That(_system.Config.ShadowCasters, Is.EqualTo(casters));
+        }
+
+        [Test]
+        public void Tick_SetsTheWideningGlobals()
+        {
+            _system.SetDensityFalloff(SpikeDensityFalloff.OnWiden);
+            _system.Tick(_camera, false);
+            Vector4 widened = Shader.GetGlobalVector("_SpikeDensityValues");
+            Vector4 cameraPosition = Shader.GetGlobalVector("_SpikeCullCameraPosition");
+            _system.SetDensityFalloff(SpikeDensityFalloff.On);
+            _system.Tick(_camera, false);
+
+            Assert.That(widened.z, Is.EqualTo(_system.Config.WidenMaxFactor));
+            Assert.That(Shader.GetGlobalVector("_SpikeDensityValues").z, Is.EqualTo(1f), "No widening without OnWiden.");
+            Assert.That((Vector3)cameraPosition, Is.EqualTo(_camera.transform.position));
+        }
+
+        private uint[] ReadCounters()
+        {
+            var counters = new uint[_system.Culler.RegionCount + 1];
+            _system.Culler.Counters.GetData(counters);
+            return counters;
+        }
+
+        [Test]
         public void SettingsChanges_SelectTheDrawsOfOneBladeDrawType()
         {
             _system.SetBladeDrawType(SpikeDrawType.ProceduralIndexedIndirect);

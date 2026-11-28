@@ -3,12 +3,71 @@ using System.Collections.Generic;
 namespace Scatter.Rendering.Spike
 {
     /// <summary>
-    /// The cases of the Phase 1 benchmark (S3), for each camera view: the baseline without scatter, every backend x
-    /// blade draw type x blade count (procedural indexed with the default K), then the K sweep of the procedural
-    /// indexed draw type for each backend.
+    /// The cases of the spike benchmark. <see cref="Create"/> (Phase 1 S3), for each camera view: the baseline without
+    /// scatter, every backend x blade draw type x blade count (procedural indexed with the default K), then the K sweep
+    /// of the procedural indexed draw type for each backend. <see cref="CreateResolution"/> and <see cref="CreateLevers"/>:
+    /// Phase 1b, BRG and procedural indexed only.
     /// </summary>
     public static class SpikeBenchmarkPlan
     {
+        private static readonly SpikeDensityFalloff[] s_Falloffs = { SpikeDensityFalloff.Off, SpikeDensityFalloff.On, SpikeDensityFalloff.OnWiden };
+
+        /// <summary>
+        /// Phase 1b item 1, for each view, render scale and shadow map resolution: the baseline without scatter, then
+        /// BRG procedural indexed at each blade count. Allocates: startup only.
+        /// </summary>
+        public static SpikeBenchmarkCase[] CreateResolution(int viewCount, int[] bladeCounts, int bladesPerInstance, float[] renderScales, int[] shadowResolutions)
+        {
+            var cases = new List<SpikeBenchmarkCase>();
+            for (int view = 0; view < viewCount; view++)
+            {
+                for (int s = 0; s < renderScales.Length; s++)
+                {
+                    for (int r = 0; r < shadowResolutions.Length; r++)
+                    {
+                        var baseline = new SpikeBenchmarkCase { View = view, ScatterEnabled = false, BladesPerInstance = 1 };
+                        baseline.RenderScale = renderScales[s];
+                        baseline.ShadowResolution = shadowResolutions[r];
+                        cases.Add(baseline);
+                        for (int c = 0; c < bladeCounts.Length; c++)
+                        {
+                            SpikeBenchmarkCase benchmarkCase = CreateCase(view, SpikeBackend.Brg, SpikeDrawType.ProceduralIndexedIndirect, bladeCounts[c], bladesPerInstance);
+                            benchmarkCase.RenderScale = renderScales[s];
+                            benchmarkCase.ShadowResolution = shadowResolutions[r];
+                            cases.Add(benchmarkCase);
+                        }
+                    }
+                }
+            }
+
+            return cases.ToArray();
+        }
+
+        /// <summary>
+        /// Phase 1b items 2 and 3, for each view: the baseline without scatter, then BRG procedural indexed with every
+        /// density falloff (off, on, on with widening) x every shadow caster preset. Allocates: startup only.
+        /// </summary>
+        public static SpikeBenchmarkCase[] CreateLevers(int viewCount, int bladeCount, int bladesPerInstance)
+        {
+            var cases = new List<SpikeBenchmarkCase>();
+            for (int view = 0; view < viewCount; view++)
+            {
+                cases.Add(new SpikeBenchmarkCase { View = view, ScatterEnabled = false, BladesPerInstance = 1 });
+                for (int f = 0; f < s_Falloffs.Length; f++)
+                {
+                    for (int casters = 0; casters < SpikeShadowCasterMask.PresetCount; casters++)
+                    {
+                        SpikeBenchmarkCase benchmarkCase = CreateCase(view, SpikeBackend.Brg, SpikeDrawType.ProceduralIndexedIndirect, bladeCount, bladesPerInstance);
+                        benchmarkCase.DensityFalloff = s_Falloffs[f];
+                        benchmarkCase.ShadowCasters = (SpikeShadowCasters)casters;
+                        cases.Add(benchmarkCase);
+                    }
+                }
+            }
+
+            return cases.ToArray();
+        }
+
         private static readonly SpikeBackend[] s_Backends = { SpikeBackend.Brg, SpikeBackend.Indirect };
 
         private static readonly SpikeDrawType[] s_DrawTypes =
