@@ -225,7 +225,25 @@ The spike shows its state under the HUD header, with the counters read back from
 | F9 | Backend: BRG or the Graphics.Render*Indirect baseline (S2). F4 only applies to BRG. |
 | F10 | Starts the full S3 benchmark (`SpikeBenchmark`). |
 
-### 5.4 Limits
+### 5.4 Reading the HUD values
+
+| HUD value | Source | What it measures |
+|---|---|---|
+| FPS, frame, p99, worst | `Time.unscaledDeltaTime`, over the last 300 frames | Time between two frames: everything, waits included, and in the Editor the Editor's own work |
+| CPU | `FrameTimingManager` `cpuFrameTime` | CPU duration of the frame, waits included. **Not** main + render: the two threads run in parallel (the main thread prepares frame N+1 while the render thread submits frame N) |
+| main | `cpuMainThreadFrameTime` | Main thread, from the start of the frame until its work is done |
+| render | `cpuRenderThreadFrameTime` | Render thread, from the start of its work until Present |
+| GPU | `gpuFrameTime` | GPU time of the whole frame |
+| Scatter CPU main | the scatter driver (`ScatterSpikeSystem.Tick` in the spike) | Our cull recording and draw submission only, not URP's rendering |
+| cull, camera, shadows, SSAO, depth, colour, motion vectors | GPU recorders on profiler markers (`UrpPassTimings`) | GPU time of these markers in the last measured frame (design 12.1: depth, colour and motion vectors in the Editor only) |
+
+Comparing with the Unity Profiler:
+- **In Play Mode in the Editor, the frame contains the Editor's work**: the Scene view (which also draws the BRG blades), Inspector repaints... The Profiler shows `PlayerLoop` and `EditorLoop` apart; `FrameTimingManager` measures the whole frame. The HUD main thread is close to `PlayerLoop` + `EditorLoop`, and the GPU time includes the Scene view and the Editor UI.
+- **The HUD is not per frame:** frame times are averaged over 300 frames, the text is refreshed 4 times per second, and `FrameTimingManager` and the GPU recorders report a frame a few frames late. The Profiler shows each frame.
+- The HUD itself (text, UI pass) is part of the frame; hide it (F1) when measuring by eye, as the benchmark does.
+- **Real numbers come from a development player** (Phase 1 S3 benchmark), without the Editor's work. In the Editor, compare with the Profiler's main thread total (with `EditorLoop`), close the Scene view, and look for the same markers in the GPU Usage module (`Scatter Cull`, `ExecuteRenderGraph`, `MainLightShadow`, `SSAO`).
+
+### 5.5 Limits
 - **GC allocated in frame** is not available in release players (shown as "-"). Check it in the Editor or in a development build.
 - **CPU and GPU times** need Player Settings "Frame Timing Stats" (enabled in this project).
 - **Frame Debugger:** BRG draws are listed as "Hybrid Batch Group"; the spike shader shows in the Shader section of the event, and vertex and index counts show 0 because they are in the GPU draw arguments.
