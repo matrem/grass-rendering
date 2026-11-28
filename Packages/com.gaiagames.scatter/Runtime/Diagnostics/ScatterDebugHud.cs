@@ -92,6 +92,12 @@ namespace Scatter.Diagnostics
             set => _stageTimings = value;
         }
 
+        /// <summary>
+        /// Extra lines shown under the header (state of the scatter driver, its keys), or null. Rich text allowed.
+        /// Set by the driver on change only: the HUD shows it at its refresh rate.
+        /// </summary>
+        public string StatusText { get; set; }
+
         /// <summary>Path of the last CSV written by <see cref="StopRecording"/>, or null.</summary>
         public string LastCsvPath { get; private set; }
 
@@ -174,7 +180,7 @@ namespace Scatter.Diagnostics
             int level = QualitySettings.GetQualityLevel();
             string tierName = level >= 0 && level < _qualityNames.Length ? _qualityNames[level] : "?";
             ScatterQuality quality = ScatterQuality.ForQualityLevel(_qualityPerLevel, level);
-            _label.text = _text.Build(_header, _sampler.Latest, _sampler.History, _stageTimings, quality, tierName, _recording ? _csvLogger : null);
+            _label.text = _text.Build(_header, _sampler.Latest, _sampler.History, _stageTimings, quality, tierName, _recording ? _csvLogger : null, StatusText);
         }
 
         private void OnUIReload(PanelRenderer panelRenderer, VisualElement root, int version)

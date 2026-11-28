@@ -20,6 +20,8 @@ namespace Scatter.Diagnostics
         public const int ColourGpuMs = 11;
         public const int ShadowsGpuMs = 12;
         public const int MotionVectorsGpuMs = 13;
+        public const int CameraGpuMs = 14;
+        public const int SsaoGpuMs = 15;
 
         /// <summary>Header names, in column order. Allocates: call at startup.</summary>
         public static string[] CreateNames()
@@ -40,6 +42,8 @@ namespace Scatter.Diagnostics
                 "colourGpuMs",
                 "shadowsGpuMs",
                 "motionVectorsGpuMs",
+                "cameraGpuMs",
+                "ssaoGpuMs",
             };
         }
 
@@ -61,6 +65,8 @@ namespace Scatter.Diagnostics
             logger.Set(ColourGpuMs, timings.ColourGpuMs);
             logger.Set(ShadowsGpuMs, timings.ShadowsGpuMs);
             logger.Set(MotionVectorsGpuMs, timings.MotionVectorsGpuMs);
+            logger.Set(CameraGpuMs, timings.CameraGpuMs);
+            logger.Set(SsaoGpuMs, timings.SsaoGpuMs);
             logger.EndRow();
         }
     }

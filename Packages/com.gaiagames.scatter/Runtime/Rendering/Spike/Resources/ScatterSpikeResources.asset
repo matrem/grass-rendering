@@ -1,0 +1,19 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 855866b341f413147a5e691a5e1c3e65, type: 3}
+  m_Name: ScatterSpikeResources
+  m_EditorClassIdentifier: Scatter.Runtime::Scatter.Rendering.Spike.ScatterSpikeResources
+  _cullCompute: {fileID: 7200000, guid: 1c9dfcaba2bab1a4992c402b5fdc8880, type: 3}
+  _bladeMeshShader: {fileID: 4800000, guid: 835839bda1d046a498c5c7a5d54f8318, type: 3}
+  _bladeProceduralShader: {fileID: 4800000, guid: 75da99cb552052143ab0ca589c8b9d9c, type: 3}
+  _objectShader: {fileID: 4800000, guid: ae0cc304c98d90d47940abeb0b4a13b4, type: 3}
+  _objectMesh: {fileID: 10200, guid: 0000000000000000e000000000000000, type: 0}

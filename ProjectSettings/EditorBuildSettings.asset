@@ -8,5 +8,8 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/Bootstrap.unity
     guid: db326d5bf03c4004795a5857ea425e6a
+  - enabled: 1
+    path: Assets/Scenes/Spike_Draw.unity
+    guid: a0824250cba44a94488a8d22051f8f88
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}

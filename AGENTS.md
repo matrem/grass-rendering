@@ -5,19 +5,21 @@ Unity 6.6 (6000.6.10f1) prototype of a GPU-driven procedural scatter system (gra
 ## Read first
 Before any work, read these documents:
 - `Docs/GrassPrototype_Design.md`: **what** is built and **why**. Source of truth for the architecture. Section 2 is the vocabulary; section 16 lists the decisions taken and the open items.
-- `Docs/GrassPrototype_Implementation.md`: **how** and **in which order**, phase by phase, with the progress table and checkboxes.
+- `Docs/Implementation/README.md`: **how** and **in which order**: the progress table (the only place with phase status), how the plan is kept up to date, the cross-cutting rules.
+- The file of the **current phase** in `Docs/Implementation/` (items with checkboxes, exit check, Notes), and the Notes of the previous phase. Open older phase files only when a task needs them: their findings are summarized in design 16.1.
 - `Docs/ProjectGuide.md`: what **exists today** and how it works (code map, assemblies, debug tools, tests, settings).
 - `Docs/CodingRules.md`: coding rules (structure, naming, zero allocation per frame, GPU code). Follow them for every change; `.editorconfig` enforces formatting and naming.
 
 ## Workflow
 - Before any work (a phase, an item, a fix or a refactor), present a detailed plan to the user and wait for approval. Ask questions or offer choices when something is ambiguous; do not decide alone.
 - Never commit: the user reviews and commits the changes. At the end of a task, report what changed and what still needs to be committed (for example new `.meta` files).
-- Work phase by phase, in order. Do not start a phase before the previous one meets its exit check. Phase 1 ends with a **stop and review** with the user before Phase 2.
+- Work phase by phase, in order. Do not start a phase before the previous one meets its exit check. A phase whose exit check says **stop and review** ends with a review with the user before the next phase.
 - An item is done only when its unit tests pass (Unity Test Framework, Edit Mode; GPU tests need a graphics device, so never use `-nographics`).
 - Keep the documents in sync **in the same change as the code**:
-  - tick the item and update the phase status in the implementation plan;
-  - record deviations and findings in a **Notes** list at the end of the phase;
+  - tick the item in its phase file, and update the phase status in the progress table of `Docs/Implementation/README.md`;
+  - record deviations and findings in a **Notes** list at the end of the phase file;
   - if a design decision changes, update the design section and its row in design 16.1. Do not reopen a 16.1 decision without new facts; ask the user first;
+  - update `Packages/com.gaiagames.scatter/README.md` when the package's requirements (project settings, dependencies), contents or public usage change: it is what a project importing the package reads;
   - update `Docs/ProjectGuide.md` so it describes what exists (new or changed classes, assemblies, folders, settings, debug tools, tests), and the status line of `README.md` when a phase changes.
 - Use the vocabulary of design section 2 in code, comments and documents (chunk, cluster, ring, block, arena, rank, blade record...). Add new terms to the vocabulary.
 

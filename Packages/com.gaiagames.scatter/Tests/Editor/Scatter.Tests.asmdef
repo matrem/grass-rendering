@@ -3,6 +3,7 @@
   "rootNamespace": "Scatter.Tests",
   "references": [
     "Scatter.Runtime",
+    "Unity.RenderPipelines.Universal.Runtime",
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner"
   ],
@@ -10,7 +11,7 @@
     "Editor"
   ],
   "excludePlatforms": [],
-  "allowUnsafeCode": false,
+  "allowUnsafeCode": true,
   "overrideReferences": true,
   "precompiledReferences": [
     "nunit.framework.dll"

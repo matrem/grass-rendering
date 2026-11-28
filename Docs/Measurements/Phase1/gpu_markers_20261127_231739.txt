@@ -1,0 +1,13 @@
+GPU marker probe: 1062 markers recorded, 12 with GPU time, 60 frames
+   7.7673 ms    60/60 frames  [Render] FrameTime.GPU
+   7.7573 ms    58/60 frames  [Render] UniversalRenderPipeline.RenderSingleCameraInternal: Main Camera
+   7.7572 ms    58/60 frames  [Render] ExecuteRenderGraph
+   3.8552 ms    58/60 frames  [Render] MainLightShadow
+   0.5836 ms    58/60 frames  [Render] SSAO
+   0.0801 ms    60/60 frames  [Render] Scatter Cull
+   0.0010 ms    25/60 frames  [Render] Setup Forward Lights
+   0.0010 ms     4/60 frames  [Render] Camera.Render
+   0.0009 ms     6/60 frames  [Render] UpdateReflectionProbeAtlas
+   0.0009 ms     5/60 frames  [Render] Setup Camera Properties
+   0.0008 ms     4/60 frames  [Render] Initialize Frame
+   0.0008 ms     3/60 frames  [Render] LightCookies

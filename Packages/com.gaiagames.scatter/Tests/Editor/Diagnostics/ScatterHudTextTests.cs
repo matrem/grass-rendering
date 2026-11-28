@@ -59,6 +59,19 @@ namespace Scatter.Tests.Diagnostics
             Assert.That(text, Does.Contain(expected));
         }
 
+        [Test]
+        public void Build_StatusText_ShownAfterTheTier()
+        {
+            var history = new FrameTimeHistory(4);
+            history.Add(10f);
+
+            string text = new ScatterHudText().Build("SCATTER", new FrameStats(), history, ScatterStageTimings.NotMeasured, _quality, "Test", null, "Spike state");
+
+            Assert.That(text, Does.Contain("Tier Test"));
+            Assert.That(text.IndexOf("Spike state", System.StringComparison.Ordinal), Is.GreaterThan(text.IndexOf("Tier Test", System.StringComparison.Ordinal)));
+            Assert.That(text.IndexOf("Spike state", System.StringComparison.Ordinal), Is.LessThan(text.IndexOf("Frame", System.StringComparison.Ordinal)));
+        }
+
         private string Build(in FrameStats stats, in ScatterStageTimings timings)
         {
             var history = new FrameTimeHistory(4);
