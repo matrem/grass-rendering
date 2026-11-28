@@ -13,6 +13,19 @@ namespace Scatter.Rendering
     {
         public const int MinSegmentCount = 1;
 
+        /// <summary>
+        /// Vertex IDs between two blades of a multi-blade index buffer: a power of two, so the vertex shader splits
+        /// SV_VertexID with a shift and a mask instead of an integer division (SPIKE_BLADE_VERTEX_STRIDE in
+        /// SpikeCommon.hlsl). Holds the largest template, 3 segments = 7 vertices.
+        /// </summary>
+        public const int MultiBladeVertexStride = 8;
+
+        /// <summary>log2 of <see cref="MultiBladeVertexStride"/> (SPIKE_BLADE_VERTEX_SHIFT in SpikeCommon.hlsl).</summary>
+        public const int MultiBladeVertexShift = 3;
+
+        /// <summary>Largest segment count of a multi-blade index buffer: its vertices fit in <see cref="MultiBladeVertexStride"/>.</summary>
+        public const int MaxMultiBladeSegmentCount = 3;
+
         public static int GetVertexCount(int segmentCount)
         {
             return 2 * segmentCount + 1;
@@ -82,20 +95,26 @@ namespace Scatter.Rendering
         }
 
         /// <summary>
-        /// Creates an index buffer drawing <paramref name="bladesPerInstance"/> blades per instance with
-        /// procedural indexed draws: blade b uses vertex IDs b * vertexCount to b * vertexCount + vertexCount - 1.
-        /// Allocates: call at startup.
+        /// Indices drawing <paramref name="bladesPerInstance"/> blades per instance with procedural indexed draws:
+        /// blade b uses vertex IDs b * <see cref="MultiBladeVertexStride"/> + template vertex. Allocates: startup only.
         /// </summary>
-        public static GraphicsBuffer CreateMultiBladeIndexBuffer(int segmentCount, int bladesPerInstance, string name)
+        public static int[] GetMultiBladeIndices(int segmentCount, int bladesPerInstance)
         {
+            Debug.Assert(segmentCount <= MaxMultiBladeSegmentCount, "Blade template too large for the multi-blade vertex stride.");
             int indexCount = GetIndexCount(segmentCount);
-            int vertexCount = GetVertexCount(segmentCount);
             var indices = new int[indexCount * bladesPerInstance];
             for (int blade = 0; blade < bladesPerInstance; blade++)
             {
-                FillTriangleIndices(segmentCount, blade * vertexCount, indices, blade * indexCount);
+                FillTriangleIndices(segmentCount, blade * MultiBladeVertexStride, indices, blade * indexCount);
             }
 
+            return indices;
+        }
+
+        /// <summary>Index buffer of <see cref="GetMultiBladeIndices"/>. Allocates: call at startup.</summary>
+        public static GraphicsBuffer CreateMultiBladeIndexBuffer(int segmentCount, int bladesPerInstance, string name)
+        {
+            int[] indices = GetMultiBladeIndices(segmentCount, bladesPerInstance);
             var buffer = new GraphicsBuffer(GraphicsBuffer.Target.Index, indices.Length, sizeof(int)) { name = name };
             buffer.SetData(indices);
             return buffer;

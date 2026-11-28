@@ -81,9 +81,9 @@ SpikeSurface SpikeComputeSurface(Attributes input)
     uint templateIndex;
     if (_Indexed > 0.5)
     {
-        uint verticesPerBlade = 2u * segmentCount + 1u;
-        bladeInInstance = input.vertexID / verticesPerBlade;
-        templateIndex = input.vertexID - bladeInInstance * verticesPerBlade;
+        // Index buffer: blade b uses vertex IDs b * SPIKE_BLADE_VERTEX_STRIDE + template vertex (BladeMeshFactory).
+        bladeInInstance = input.vertexID >> SPIKE_BLADE_VERTEX_SHIFT;
+        templateIndex = input.vertexID & (SPIKE_BLADE_VERTEX_STRIDE - 1u);
     }
     else
     {

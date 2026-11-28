@@ -17,6 +17,11 @@
 #define SPIKE_DRAW_PROCEDURAL_INDIRECT 1u
 #define SPIKE_DRAW_PROCEDURAL_INDEXED_INDIRECT 2u
 
+// Vertex IDs between two blades of a K-blade index buffer (power of two: shift and mask, no integer division).
+// Mirrored by BladeMeshFactory.MultiBladeVertexStride and MultiBladeVertexShift, checked by BladeMeshFactoryTests.
+#define SPIKE_BLADE_VERTEX_STRIDE 8u
+#define SPIKE_BLADE_VERTEX_SHIFT 3u
+
 // Uints between two draws in the draw arguments buffer. Each draw writes 5 uints (IndirectDrawIndexedArgs;
 // non-indexed procedural draws read the first 4, IndirectDrawArgs). The Graphics.Render*Indirect calls address
 // arguments by command index (20-byte or 16-byte commands): 20 uints = 80 bytes is a multiple of both.

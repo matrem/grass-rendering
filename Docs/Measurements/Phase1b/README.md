@@ -14,3 +14,5 @@ How to read the CSVs:
 - Scatter cost of a case = its value minus the case without scatter of the same view (and, for the resolution run, of the same render scale and shadow map).
 - Depth + colour = `cameraGpu` - `shadowsGpu` - `ssaoGpu`: players have no GPU time for the Render Graph depth and colour passes (design 12.1).
 - Rocks cost = the run with rocks minus the run without, same case.
+
+**Vertex shader cleanups** (implementation plan, Phase 1b item 6), folder `vertex_cleanup`: the levers benchmark without rocks (`-spikeBenchmarkLevers -spikeBenchmarkNoObjects`), run four times in a row, alternating the build before the cleanups (`run1`, `run3`) and after (`run2`, `run4`), so a drift of the GPU over time shows in both. Compare each case with the run of the same build and with the other build.

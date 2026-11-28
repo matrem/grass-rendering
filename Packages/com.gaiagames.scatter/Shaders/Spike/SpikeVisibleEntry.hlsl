@@ -26,17 +26,16 @@ ByteAddressBuffer _SpikeVisibleList;
 uint SpikeLoadVisibleEntry(uint instanceID, uint bladeInInstance)
 {
     uint k = max((uint)_BladesPerInstance, 1u);
-#if defined(UNITY_DOTS_INSTANCING_ENABLED)
-    if (k == 1u)
-    {
-        // BRG reads visibleOffset + instance ID in the bound window of the visible list.
-        return GetDOTSInstanceIndex();
-    }
-
-    // K blades per instance: BRG gives the first entry of the draw (its visibleOffset); entries are read
-    // directly from the same bound buffer.
+#if defined(UNITY_DOTS_INSTANCING_ENABLED) && defined(SPIKE_BLADE_PROCEDURAL)
+    // Procedural draws: BRG gives the first entry of the draw (its visibleOffset); entries are read directly from
+    // the same bound buffer, for every K (K = 1 reads the entry GetDOTSInstanceIndex would return). No branch on K:
+    // the entry the instance setup reads (unity_SampledDOTSInstanceIndex) is then unused, and the compiler drops
+    // that read, in every pass but the forward pass (which needs it for the ambient SH).
     uint firstEntry = GetDOTSIndirectVisibleIndex() - instanceID;
     return LoadDOTSIndirectInstanceIndex(firstEntry + instanceID * k + bladeInInstance);
+#elif defined(UNITY_DOTS_INSTANCING_ENABLED)
+    // Mesh draws (one blade per instance): BRG reads visibleOffset + instance ID in the visible list.
+    return GetDOTSInstanceIndex();
 #else
     return _SpikeVisibleList.Load(((uint)_RegionStart + instanceID * k + bladeInInstance) << 2);
 #endif

@@ -50,6 +50,41 @@ namespace Scatter.Tests.Rendering
         }
 
         [Test]
+        public void MultiBladeIndices_PutEachBladeAtAPowerOfTwoStride_WithTheTemplateTriangles()
+        {
+            const int blades = 16;
+            Assert.That(1 << BladeMeshFactory.MultiBladeVertexShift, Is.EqualTo(BladeMeshFactory.MultiBladeVertexStride));
+            Assert.That(BladeMeshFactory.GetVertexCount(BladeMeshFactory.MaxMultiBladeSegmentCount), Is.LessThanOrEqualTo(BladeMeshFactory.MultiBladeVertexStride));
+            for (int segmentCount = 1; segmentCount <= BladeMeshFactory.MaxMultiBladeSegmentCount; segmentCount++)
+            {
+                int indexCount = BladeMeshFactory.GetIndexCount(segmentCount);
+                var template = new int[indexCount];
+                BladeMeshFactory.FillTriangleIndices(segmentCount, 0, template, 0);
+
+                int[] indices = BladeMeshFactory.GetMultiBladeIndices(segmentCount, blades);
+
+                Assert.That(indices.Length, Is.EqualTo(indexCount * blades));
+                for (int i = 0; i < indices.Length; i++)
+                {
+                    // What the vertex shader decodes: blade = id >> shift, template vertex = id & (stride - 1).
+                    int blade = indices[i] >> BladeMeshFactory.MultiBladeVertexShift;
+                    int templateVertex = indices[i] & (BladeMeshFactory.MultiBladeVertexStride - 1);
+                    Assert.That(blade, Is.EqualTo(i / indexCount), $"{segmentCount} segments, index {i}.");
+                    Assert.That(templateVertex, Is.EqualTo(template[i % indexCount]), $"{segmentCount} segments, index {i}.");
+                }
+            }
+        }
+
+        [Test]
+        public void MultiBladeStride_MatchesTheHlslDefines()
+        {
+            string hlsl = System.IO.File.ReadAllText("Packages/com.gaiagames.scatter/Shaders/Spike/SpikeCommon.hlsl");
+
+            Assert.That(hlsl, Does.Contain("#define SPIKE_BLADE_VERTEX_STRIDE " + BladeMeshFactory.MultiBladeVertexStride + "u"));
+            Assert.That(hlsl, Does.Contain("#define SPIKE_BLADE_VERTEX_SHIFT " + BladeMeshFactory.MultiBladeVertexShift + "u"));
+        }
+
+        [Test]
         public void FillTriangleIndices_OffsetsEachBladeOfAMultiBladeBuffer()
         {
             const int segmentCount = 2;

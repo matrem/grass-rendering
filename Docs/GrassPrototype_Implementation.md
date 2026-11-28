@@ -9,7 +9,7 @@ Phases are ordered so the riskiest parts are proven first. Each phase ends with 
 |---|---|
 | 0 - Project setup | Done |
 | 1 - Spikes | Done |
-| 1b - Cost investigation | In progress |
+| 1b - Cost investigation | Done |
 | 2 - Core pipeline on a flat ground | Not started |
 | 3 - Layers | Not started |
 | 4 - Terrain adapter and streaming | Not started |
@@ -159,7 +159,7 @@ Spike content: 1M blades on a flat grid, per-blade data (position, yaw) in a cus
 3. [x] **Shadow casters** (design 6.2): five presets of the blade casters (split visibility mask): all LODs in 4 cascades (Phase 1), LOD0 in 4 cascades, LOD0 in the first 2, LOD0 in the first, none. BRG only (Graphics.Render*Indirect cannot limit the cascades). Benchmark mode `-spikeBenchmarkLevers`: BRG, K16, 4M blades, 2 views x (baseline + falloff off, on, on with widening x 5 presets) = 32 cases.
 4. [x] Tests: new benchmark plans and CSV columns, density rule against a C# reference on the GPU, density curve and width factor, caster split masks per preset, URP settings applied and restored; no allocation.
 5. [x] Debug: F11 density falloff (off, on, on with widening), F12 caster preset; HUD state of both, counters of visible blades per LOD.
-6. [ ] Vertex shader cleanups that keep the image (added at the review): K-blade index buffers with a power-of-two vertex stride (8), so the shader splits `SV_VertexID` with a shift and a mask instead of an integer division; procedural draws read their visible entry without a branch on K, so the read of the instance setup is dropped by the compiler in the passes without ambient; the ambient of both blade sides from one SH evaluation (L0 and L2 once). Tests: index layout and stride constants mirrored in HLSL; the render tests check the image. Measured before and after on the levers benchmark (blades only).
+6. [x] Vertex shader cleanups that keep the image (added at the review): K-blade index buffers with a power-of-two vertex stride (8), so the shader splits `SV_VertexID` with a shift and a mask instead of an integer division; procedural draws read their visible entry without a branch on K, so the read of the instance setup is dropped by the compiler in the passes without ambient; the ambient of both blade sides from one SH evaluation (L0 and L2 once). Tests: index layout and stride constants mirrored in HLSL; the render tests check the image. Measured before and after on the levers benchmark (blades only).
 
 **Exit:** a cost model (vertex, fragment and shadow cost per visible blade, and the part independent of the blade count), a revised estimate for design 10.1, and the resulting adjustments to Phase 2 (and design 5.3, 6.2 if needed). **Stop and review before Phase 2.**
 
@@ -205,7 +205,8 @@ Spike content: 1M blades on a flat grid, per-blade data (position, yaw) in a cus
   3. Design 10.1 and 12 use the cost model above: about 0.9M visible blades within the RTX 3060 Ti budget; the stress scene is a load reference above the budget.
   4. Phase 2 measures the far blade LOD (LOD2 template, 3 vertices, 1 triangle) and its distance early, and the cost of the DepthNormals prepass (new Phase 2 item 11).
   5. Every layer, Blade or Object, has mesh LODs, a density curve and a shadow mode from the start (Phase 3 items 2 and 4).
-- Not measured, for Phase 2: the arithmetic of the vertex shader is likely not the limit. At 1M visible blades a camera pass is about 5M vertices and 3M triangles in 0.6 ms, and the shadow pass (simplest shader) reaches about 7 billion triangles per second, close to the triangle setup rate of the GPU. Fewer triangles (blade LODs) and fewer passes are the levers; a GPU profiler (Nsight Graphics) can confirm it.
+- **The arithmetic of the vertex shader is not the limit.** At 1M visible blades a camera pass is about 5M vertices and 3M triangles in 0.6 ms, and the shadow pass (simplest shader) reaches about 7 billion triangles per second, close to the triangle setup rate of the GPU. Item 6 checks it: the cleanups (no integer division, no extra visible list read, half the ambient SH work) change nothing measurable. Levers benchmark without rocks, the build before and after alternated twice (`Docs/Measurements/Phase1b/vertex_cleanup`): mean difference +0.02 ms over the 30 cases, while two runs of the same build differ by 0.06 to 0.2 ms; the shadow pass with every LOD casting (2.1M blades in 4 cascades, the most vertex work) moves by -0.001 ms. The cleanups are kept: same image, simpler code, and they may count on a GPU that is less limited by triangles. The levers are fewer triangles (blade LODs, Phase 2 item 11) and fewer passes; Nsight Graphics (GPU Trace) can show the triangle setup limit directly.
+- After a shader change, the first Play Mode run in the Editor can fail `Runner_MeasuresEveryCase_WithVisibleBladesAndPassTimings` (no colour pass GPU time in one case): the Editor compiles the new variants asynchronously and the test measures after 8 warm-up frames. The next run passes.
 - Buffers checked: every buffer of the draw path is GPU-only (default usage flags: no `LockBufferForWrite`, no `Dynamic`), written on the GPU or once with `SetData`; visible list and blade data are read in increasing address order. The spike draws blades in placement (R2) order, scattered on screen; Phase 2 stores them per cluster, which keeps consecutive triangles close on screen.
 
 ---

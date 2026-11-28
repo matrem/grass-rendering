@@ -7,7 +7,7 @@ Prototype of a **GPU-driven procedural scatter system** (grass, flowers, moss, s
 | Engine | Unity 6.6 (6000.6.10f1), URP 17.6, Forward+, Linear colour |
 | Platform | Windows PC, Direct3D 12 (Vulkan checked) |
 | GPUs | Test: RTX 3060 Ti. Target: RTX 5070 Ti |
-| Status | Phase 0 (project setup) done. Phase 1 (spikes) done: BRG confirmed, procedural indexed draws (K = 16) for blades. Phase 1b (cost investigation): measurements done, review pending. Details in the [implementation plan](Docs/GrassPrototype_Implementation.md#progress). |
+| Status | Phase 0 (project setup) done. Phase 1 (spikes) done: BRG confirmed, procedural indexed draws (K = 16) for blades. Phase 1b (cost investigation) done: density falloff with widening and LOD0-only shadow casters put one dense layer (0.9M visible blades) at the RTX 3060 Ti budget. Next: Phase 2 (core pipeline). Details in the [implementation plan](Docs/GrassPrototype_Implementation.md#progress). |
 
 ## Which document to read
 

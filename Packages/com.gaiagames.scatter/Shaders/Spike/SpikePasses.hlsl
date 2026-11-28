@@ -42,6 +42,27 @@ struct Varyings
 #endif
 };
 
+#if defined(SPIKE_PASS_FORWARD)
+// Ambient of both sides of a blade from one SH evaluation: SampleSH(n) and SampleSH(-n) of AmbientProbe.hlsl
+// (AMBIENT_PROBE_BUFFER 0 in URP) up to float rounding. The L0 and L2 bands are even in n and L1 is odd, so
+// the back side is L0 - L1 + L2: the L0 and L2 terms are evaluated once.
+void SpikeSampleSHBothSides(float3 normalWS, out half3 front, out half3 back)
+{
+    real3 l0 = real3(unity_SHAr.w, unity_SHAg.w, unity_SHAb.w);
+    real3 l1 = real3(dot(unity_SHAr.xyz, normalWS), dot(unity_SHAg.xyz, normalWS), dot(unity_SHAb.xyz, normalWS));
+    real3 l2 = SHEvalLinearL2(normalWS, unity_SHBr, unity_SHBg, unity_SHBb, unity_SHC);
+    real3 even = l0 + l2;
+    real3 frontSH = even + l1;
+    real3 backSH = even - l1;
+#ifdef UNITY_COLORSPACE_GAMMA
+    frontSH = LinearToSRGB(frontSH);
+    backSH = LinearToSRGB(backSH);
+#endif
+    front = frontSH;
+    back = backSH;
+}
+#endif
+
 // Empty visible list entries (padding of K-blade instances) collapse to one point: no triangle is rasterised.
 static const float4 SpikeCollapsedPositionCS = float4(0.0, 0.0, 0.0, 1.0);
 
@@ -73,8 +94,7 @@ Varyings SpikeVertex(Attributes input)
     // Ambient per vertex, in the stage where the instance setup ran: with BRG, SampleSH reads the SH values
     // that UNITY_SETUP_INSTANCE_ID samples (unity_DOTS_Sampled_SH*), which are 0 in a stage without the setup.
     // Blades are double-sided: both sides, chosen per pixel.
-    output.ambientFront = SampleSH(surface.normalWS);
-    output.ambientBack = SampleSH(-surface.normalWS);
+    SpikeSampleSHBothSides(surface.normalWS, output.ambientFront, output.ambientBack);
 #elif defined(SPIKE_PASS_DEPTH_NORMALS)
     output.normalWS = surface.normalWS;
 #elif defined(SPIKE_PASS_MOTION_VECTORS)

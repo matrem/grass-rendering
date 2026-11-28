@@ -4,7 +4,7 @@ GPU-driven procedural scatter (grass, flowers, moss, small rocks, bushes) for UR
 
 The package has **no dependency on any terrain code**: a terrain connects through a small adapter (section 4.4 of the prototype design document). It is developed in the `grass-rendering` prototype and is meant to be imported as is into the production project.
 
-> Status: version 0.1.0, prototype. Phase 1 (spikes) is done: the BRG draw path is proven (procedural indexed draws, K = 16 blades per instance, for Blade layers; mesh indirect for Object layers), with its measurement tools. The scatter pipeline itself (chunks, generation, layers) starts in Phase 2 (see the implementation plan of the prototype repository). Phase 1b (cost investigation: density falloff, widening, shadow caster presets, resolution benchmark) is in progress in the same spike code. The `Rendering/Spike` code is test code of Phases 1 and 1b, replaced in Phase 2.
+> Status: version 0.1.0, prototype. Phase 1 (spikes) is done: the BRG draw path is proven (procedural indexed draws, K = 16 blades per instance, for Blade layers; mesh indirect for Object layers), with its measurement tools. The scatter pipeline itself (chunks, generation, layers) starts in Phase 2 (see the implementation plan of the prototype repository). Phase 1b (cost investigation: density falloff, widening, shadow caster presets, resolution benchmark) is done in the same spike code. The `Rendering/Spike` code is test code of Phases 1 and 1b, replaced in Phase 2.
 
 ## Requirements
 
