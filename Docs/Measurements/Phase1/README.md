@@ -1,6 +1,6 @@
 # Phase 1 measurements (S3)
 
-RTX 3060 Ti, Direct3D 12, 2560x1440 fullscreen, development player of `Spike_Draw` (`Scatter Prototype > Build Spike Development Player`), Unity 6000.6.10f1, URP 17.6. Depth priming Auto, SSAO on, 4 shadow cascades (50 m), no TAA. Findings and analysis: Phase 1 notes of the [implementation plan](../../GrassPrototype_Implementation.md).
+RTX 3060 Ti, Direct3D 12, 2560x1440 fullscreen, development player of `Spike_Draw` (`Scatter Prototype > Build Spike Development Player`), Unity 6000.6.10f1, URP 17.6. Depth priming Auto, SSAO on, 4 shadow cascades (50 m), no TAA. Findings and analysis: Notes of the [Phase 1 file](../../Implementation/Phase1_Spikes.md) of the implementation plan.
 
 | File | Run | Content |
 |---|---|---|

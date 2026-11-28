@@ -1,6 +1,6 @@
 # Phase 1b measurements (cost investigation)
 
-RTX 3060 Ti, Direct3D 12, 2560x1440 fullscreen, development player of `Spike_Draw` (`Scatter Prototype > Build Spike Development Player`), Unity 6000.6.10f1, URP 17.6. Depth priming Auto, SSAO on, 4 shadow cascades (50 m), no TAA. BRG, procedural indexed draws, K = 16. 60 warm-up frames and 300 measured frames per case, median and 99th percentile. Findings and analysis: Phase 1b notes of the [implementation plan](../../GrassPrototype_Implementation.md).
+RTX 3060 Ti, Direct3D 12, 2560x1440 fullscreen, development player of `Spike_Draw` (`Scatter Prototype > Build Spike Development Player`), Unity 6000.6.10f1, URP 17.6. Depth priming Auto, SSAO on, 4 shadow cascades (50 m), no TAA. BRG, procedural indexed draws, K = 16. 60 warm-up frames and 300 measured frames per case, median and 99th percentile. Findings and analysis: Notes of the [Phase 1b file](../../Implementation/Phase1b_CostInvestigation.md) of the implementation plan.
 
 | File | Run | Content |
 |---|---|---|

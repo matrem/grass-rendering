@@ -1,0 +1,90 @@
+# Phase 1 - Spikes (prove the risky rendering path)
+
+Part of the [implementation plan](README.md) (progress, rules, how the plan is kept up to date). Section numbers like 6.2 refer to the [design](../GrassPrototype_Design.md).
+
+**Goal:** confirm that the draw path of design section 6.3 works before building on it, and choose the draw command type for each usage.
+
+Only the indirect command types are candidates: the instance count is decided on the GPU and never read back (design 10.2), so the direct `BatchDrawCommand` and `BatchDrawCommandProcedural` are excluded. Usages to decide:
+
+| Usage | Candidates |
+|---|---|
+| Blade layers (grass, flowers, moss): millions of blades of 3 to 7 vertices | Mesh indirect, 1 blade per instance; procedural indirect, 1 blade per instance; procedural indirect indexed, K blades per instance |
+| Object layers (small rocks, bushes): fewer instances, meshes of a few hundred vertices | Mesh indirect |
+| Shadow, depth and motion-vector passes | The command of the colour pass, sent again for each view |
+
+Spike content: 1M blades on a flat grid, per-blade data (position, yaw) in a custom StructuredBuffer filled at startup. One spike cull compute per frame resets the args, picks LOD0 or LOD1 per blade by distance, reserves entries with an atomic add (with a region overflow guard) and writes 4-byte indices into **one visible list with two regions** (LOD0, LOD1).
+
+- [x] **S1 - BRG:** a `BatchRendererGroup` draws the spike content three ways: mesh indirect (`BatchDrawCommandIndirect`), procedural indirect with 1 blade per instance, procedural indirect indexed with K blades per instance (blade index from `SV_VertexID`). Plus one Object layer (a simple imported mesh) drawn with mesh indirect. The hand-written URP shader reads the blade data from the custom StructuredBuffer through the visible list.
+  Check, for each variant: the two regions are read through `visibleInstancesBufferWindowOffset` (or the shader's own offset for procedural); `UniversalForward`, `ShadowCaster` (shadow cascades with the split visibility mask), `DepthOnly`, `DepthNormals` (SSAO and depth priming on) and `MotionVectors` passes work; whether per-instance BRG metadata or the DOTS instancing variant is needed.
+- [x] **S2 - Baseline:** the same Blade variants with `Graphics.RenderMeshIndirect` and `Graphics.RenderPrimitivesIndexedIndirect`, same compute output.
+- [x] **S3 - Timing:** GPU time of the cull compute and of the draws, per variant and per backend, at the same blade count, on the RTX 3060 Ti; sweep of K for the procedural indexed variant.
+- [x] Graphics Settings: check that "BatchRendererGroup Variants" keeps the DOTS instancing variants in players (the default strips them when Entities Graphics is not installed); check in a Windows build.
+- [x] Debug: HUD cull and colour timing rows fed by the spike; keys to switch backend, draw variant and blade count.
+- [x] Tests: cull compute vs a C# reference (region counts and offsets, args reset, overflow guard); no allocation in the per-frame entry points (dispatch submission, `OnPerformCulling`); Play Mode render of each backend and variant to a render texture, in the Editor and in a Windows player: blade pixels present, no error shader.
+
+**Exit:** a findings note: what works, any API limitation, and a decision table (usage, command type, backend, K) confirming BRG as main path (or fallback to RenderMeshIndirect). If Blade layers become procedural, the change to design 6.3, Phase 2 item 1 and the 16.1 row is presented at the review. **Stop and review before Phase 2.**
+
+**Notes**
+- Spike code in the package: `Runtime/Rendering/Spike` (namespace `Scatter.Rendering.Spike`, replaced in Phase 2), `Shaders/Spike`; the blade mesh factory `Runtime/Rendering/BladeMeshFactory.cs` is kept for Phase 2. Scene `Assets/Scenes/Spike_Draw.unity` (second scene of the build), created with **Scatter Prototype > Create Spike Content**.
+- Spike content: 4M blades placed on an R2 sequence (any prefix is evenly spread, so the active count can change), plus 16k small rocks for the Object layer. **Three regions** in one visible list: blade LOD0, blade LOD1, objects.
+- **BRG indirect with a custom per-instance buffer works** for the three blade draw types and the Object layer (design 16.2 item): the batch has an empty metadata list, the shader reads its own StructuredBuffer with `GetDOTSInstanceIndex()`. For K blades per instance, the shader reads the K entries directly from the visible list BRG binds (`GetDOTSIndirectVisibleIndex()` and `LoadDOTSIndirectInstanceIndex`).
+- **`visibleInstancesBufferWindowOffset` cannot be used on D3D12 and Vulkan.** There BRG works with raw buffers (`BatchRendererGroup.BufferTarget == RawBuffer`) and rejects a command with a window: it prints "BatchRendererGroup had non-zero ConstantBuffer mode parameters when BufferTarget is RawBuffer" and draws nothing. The window is for the constant buffer mode (OpenGL ES, WebGL). Regions are addressed with **`visibleOffset`**, as the GPU Resident Drawer does. Design 6.3 updated; the play mode test `Render_WindowOffset_IsRejectedInRawBufferMode` keeps the finding checked.
+- **The default "BatchRendererGroup Variants" setting strips the `DOTS_INSTANCING_ON` variants from players**: the first player run failed with "variant DOTS_INSTANCING_ON not found" (strict variant matching). Set to **Keep All** (`m_BrgStripping: 2`; 1 does not keep them) by **Scatter Prototype > Create Spike Content**: the editor property `EditorGraphicsSettings.batchRendererGroupShaderStrippingMode` is read-only, so the tool writes the serialized Graphics Settings. Design 6.3 updated.
+- `Scatter.Runtime` and `Scatter.Tests` allow unsafe code: BRG draw commands are written through native pointers (`BatchCullingOutputDrawCommands`). `InternalsVisibleTo("Scatter.Tests")` gives the tests the body of the culling callback.
+- Draw arguments are written by a small finalize kernel after the cull (one thread per draw), for every draw type: mesh and procedural indexed use 5 uints, non-indexed procedural the first 4. Draws are **80 bytes apart** in the arguments buffer: the `Graphics.Render*Indirect` calls (S2) take a command index, not a byte offset, in 20-byte (`IndirectDrawIndexedArgs`) or 16-byte (`IndirectDrawArgs`) commands, and 80 is a multiple of both. BRG takes a byte offset and is not affected.
+- S2 baseline (`SpikeIndirectRenderer`, F9 switches the backend): the same materials and cull output as BRG, drawn with `Graphics.RenderMeshIndirect` (mesh and rocks), `RenderPrimitivesIndirect` (procedural) and `RenderPrimitivesIndexedIndirect` (K blades per instance), queued every frame after the cull. The shaders read the visible list through the material (`_SpikeVisibleList` from `_RegionStart`) in their non-DOTS variant; `SV_InstanceID` starts at 0 because the arguments set the start instance to 0. Shadows and motion vectors through `RenderParams`. For K blades per instance it rounds the instance count up and pads the region with an empty entry (`0xFFFFFFFF`) that the vertex shader collapses; region capacities are multiples of the largest K (64).
+- **The two backends first shaded differently** (seen in the Editor: Indirect lighter). The play mode test `Render_BothBackends_ShadeTheSame` now renders both and compares the mean colour per term, with two debug views added for it (F8: main light only, ambient only). Two shader mistakes, no Unity limitation:
+  - BRG had no ambient: `SampleSH` was called in the fragment shader, but under BRG it reads values sampled by `UNITY_SETUP_INSTANCE_ID` (`unity_DOTS_Sampled_SH*`), which only ran in the vertex shader. Fix: ambient evaluated per vertex (both sides of the blade), right after the setup. URP Lit runs the setup in the fragment shader instead; per vertex is cheaper for grass.
+  - The Indirect backend had no main light once `distanceAttenuation` was applied: in Forward+ URP does not fill the per-object `unity_LightData`, and `GetMainLight()` ignores it only on the cluster path. Fix: the forward pass declares `_CLUSTER_LIGHT_LOOP`, as URP Lit does. Under BRG the value comes from an instance flag, which is why BRG had the main light.
+  Design 8.1 and 8.2 updated.
+- S2 passes checked together in the Editor with the Indirect backend: same picture as BRG for every debug view, our 3 draws in the shadow cascades (development player), DepthNormals prepass, depth priming (ZTest Equal) and MotionVectors (TAA, no trails).
+- **Known difference, players only:** with the Indirect backend, blades receive slightly less main light shadow from other blades (shadow term 0.979 vs 0.959 on average in the test view, about 3,000 pixels of 65,536, rocks identical). The test is repeatable (two BRG renders are identical), diffuse and ambient terms match, and both backends submit the same draws in every cascade (checked in the Frame Debugger of a development player) with the same instance counts: the GPU work is the same, only the depth the blade casters leave in the shadow map differs. In the Editor both backends match exactly. Not investigated further: BRG is the main path; Phase 8 item 2 checks it. The cases of `Render_BothBackends_ShadeTheSame` that contain the shadow term (`Off`, `MainLight`, `Shadow`) are ignored in players with this reason; `Ambient` and `Diffuse` stay strict.
+- **S3 measurements** (2026-11-27, files and conditions in `Docs/Measurements/Phase1`; reference run `spike_benchmark_full_20261127_232809.csv`, values below from the first run, within 0.2 ms): RTX 3060 Ti, D3D12, 2560x1440, development player, depth priming Auto, SSAO on, 4 shadow cascades (50 m), no TAA. 300 measured frames per case, median. 4M blades on 150 m x 150 m, about 2.1M visible (no density falloff in the spike: every blade up to 120 m is full size). Scatter GPU = frame GPU minus the run without scatter (0.96 ms):
+
+  | View 0 (1.8 m high), 4M blades | BRG | Indirect |
+  |---|---|---|
+  | Mesh indirect, 1 blade per instance | 14.7 ms | 14.8 ms |
+  | Procedural indirect, 1 blade per instance | 16.9 ms | 17.2 ms |
+  | Procedural indexed indirect, K = 16 | **11.9 ms** | 12.1 ms |
+
+  - K sweep (BRG, 4M, view 0): K2 16.7, K4 15.3, K8 13.9, K16 11.9, K32 12.0, K64 12.0 ms: a plateau from K = 16.
+  - Procedural indexed K16 is about 19% faster than mesh indirect: drawing one blade per instance wastes vertex work. Non-indexed procedural is the slowest: 15 vertex shader runs per blade instead of 7 (no vertex reuse).
+  - BRG is 0.1 to 0.3 ms faster than the Indirect baseline in every case. Draw submission CPU is 0.003 to 0.015 ms for both; spike CPU (cull recording) 0.03 to 0.09 ms. Cull compute GPU 0.09 ms (1M) to 0.22 ms (4M).
+  - View 1 (10 m high) is 0.5 to 0.7 ms slower, same ranking. 99th percentile within 0.5 ms of the median everywhere.
+  - Cost is not proportional to the blade count: 1M blades (0.53M visible) already cost 6.7 ms with mesh indirect, 4M (2.1M visible) 14.7 ms.
+  - **Far above the budget of design 12** (scatter GPU 2.5 ms): about 12 ms for 2.1M visible blades. Every visible blade is drawn 6 times (4 shadow cascades, DepthNormals, colour), at full size up to 120 m.
+  - The URP pass GPU times (`UrpPassTimings`) are empty in this run: it listened to the Render Graph pass markers, which have no GPU time in players (next note).
+- **Breakdown of the scatter cost** (reference run, BRG, view 0; scatter cost = value minus the run without scatter, which has 0.01 ms of shadows and 0.4 ms of depth + colour):
+
+  | | Shadows (4 cascades) | Depth + colour | Cull | Total |
+  |---|---|---|---|---|
+  | Mesh indirect, 4M (2.1M visible) | 8.4 ms | 6.4 ms | 0.22 ms | 14.8 ms |
+  | Procedural indexed K16, 4M | 6.1 ms | 5.8 ms | 0.22 ms | 11.9 ms |
+  | Procedural indexed K16, 1M (0.53M visible) | 3.2 ms | 2.8 ms | 0.09 ms | 6.0 ms |
+
+  - Shadows are about half of the cost: every visible blade is drawn into the 4 cascades (one command visible in every split).
+  - K16 gains mostly in the shadow pass (-28%, vertex work only) and less in depth + colour (-9%).
+  - Not proportional to the blade count: from 0.5M to 2.1M visible, shadows grow by about 2.9 ms per million blades, but 0.5M already cost 3.2 ms: a large part does not depend on the blade count (likely pixel fill of the dense grass, in the shadow map and on screen).
+  - SSAO itself stays at 0.55 ms with or without blades. View 1 (10 m high) gives the same split, 0.3 to 0.5 ms higher.
+- **Which GPU times exist in a player** (`GpuMarkerProbe`, `-spikeTimingProbe`): of 1,062 markers, 12 have a GPU time: `ExecuteRenderGraph` (camera), `MainLightShadow`, `SSAO`, our `Scatter Cull`, and small setup scopes. The Render Graph pass markers (`DrawOpaqueObjects`, `DrawDepthNormalPrepass`, `DrawMotionVectors`) and the engine's `RenderLoop.ScheduleDraw` have none, though the Profiler window shows the latter. Same list with graphics jobs (`kGfxThreadingModeSplitJobs`, default), without (`-force-gfx-mt`) and on the main thread (`-force-gfx-direct`). Unity's Profiler warns that URP and HDRP do not show most GPU markers. So `UrpPassTimings` reads camera, shadows and SSAO everywhere, and depth, colour and motion vectors in the Editor only; design 12.1 updated. The first probe (1M blades, view 0, mesh indirect) already shows the shadow cascades at 3.9 ms of 7.9 ms.
+- The benchmark first had a breakdown mode switching shadows and SSAO off; it was removed once shadows were measurable directly. Switching SSAO off at runtime also needs the Lit variants without SSAO, which URP strips from builds whose renderers all use SSAO (the ground drew with the error shader).
+- **Decisions (accepted at the review, 2026-11-27):**
+
+  | Usage | Command type | Backend | K |
+  |---|---|---|---|
+  | Blade layers (grass, flowers, moss) | Procedural indexed indirect (blade built from `SV_VertexID`, K-blade index buffer) | BRG | 16 (plateau from 16 to 64) |
+  | Object layers (small rocks, bushes) | Mesh indirect | BRG | - |
+  | Shadow, depth, motion-vector passes | The command of the colour pass, sent again for each view | BRG | - |
+
+  BRG is confirmed as the main path: 0.1 to 0.3 ms faster than the Graphics.Render*Indirect baseline, same CPU cost (submission under 0.02 ms). Applied to design 2 (vocabulary: blade template, K), 6.3, 6.4, 7 and the 16.1 row; the two Phase 1 open items of 16.2 are closed; Phase 2 item 1 updated.
+- **To discuss at the review: cost.** About 12 ms of scatter GPU for 2.1M visible blades at 1440p on the RTX 3060 Ti, against 2.5 ms in design 12; design 10.1 expected 1.5 to 2M visible blades within the budget. The spike has no density falloff (5.3) and casts every blade in every cascade (6.2 plans near casters in the first cascades only): both directly reduce the two halves measured. Phase 2 can measure them on the real pipeline.
+- Final validation (RTX 3060 Ti, D3D12): Edit Mode 61/61, Play Mode 28/28 in the Editor, Play Mode in a Windows player 25/28 with 3 ignored (the cases of `Render_BothBackends_ShadeTheSame` containing the shadow term, known difference above).
+- Debug views (F8, `SpikeDebugView`): off, colour per draw, main light only, ambient only, shadow only, diffuse only. Added to compare the backends term by term.
+- `Scatter Prototype > Build Spike Development Player` (`PrototypeBuild.BuildSpikeDevelopment`): development build of `Spike_Draw` alone, for the Frame Debugger and the Profiler attached to a player.
+- The cull reserves entries with one atomic add per thread group and LOD (group shared counters), not one per instance.
+- Passes checked together in the Editor (Frame Debugger, scene `Spike_Draw`), with the mesh and procedural indexed blade draw types:
+  - BRG draws are named "Hybrid Batch Group" in the Frame Debugger; the shader shows only in the Shader section. Vertex and index counts show 0: they are in the GPU draw arguments.
+  - `ShadowCaster`: our 3 draws (blade LOD0, LOD1, rocks) in each of the 4 cascades. One GPU draw per command (no batching across commands), as designed: the draw count is fixed (design 12).
+  - `DepthNormals`: our 3 draws in the DepthNormals prepass that SSAO requests.
+  - Depth priming (Forced): URP primes from the DepthNormals prepass (no separate depth prepass); the opaque pass draws our blades with ZTest Equal and ZWrite Off and they stay visible, so every pass computes the same vertex positions.
+  - `MotionVectors` (TAA on the camera): our 3 draws in the pass, no visible trails when moving. Blades are static in the spike; wind and interaction come in Phases 6 to 8.

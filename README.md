@@ -7,7 +7,7 @@ Prototype of a **GPU-driven procedural scatter system** (grass, flowers, moss, s
 | Engine | Unity 6.6 (6000.6.10f1), URP 17.6, Forward+, Linear colour |
 | Platform | Windows PC, Direct3D 12 (Vulkan checked) |
 | GPUs | Test: RTX 3060 Ti. Target: RTX 5070 Ti |
-| Status | Phase 0 (project setup) done. Phase 1 (spikes) done: BRG confirmed, procedural indexed draws (K = 16) for blades. Phase 1b (cost investigation) done: density falloff with widening and LOD0-only shadow casters put one dense layer (0.9M visible blades) at the RTX 3060 Ti budget. Next: Phase 2 (core pipeline). Details in the [implementation plan](Docs/GrassPrototype_Implementation.md#progress). |
+| Status | Phase 0 (project setup) done. Phase 1 (spikes) done: BRG confirmed, procedural indexed draws (K = 16) for blades. Phase 1b (cost investigation) done: density falloff with widening and LOD0-only shadow casters put one dense layer (0.9M visible blades) at the RTX 3060 Ti budget. Next: Phase 2 (core pipeline). Details in the [implementation plan](Docs/Implementation/README.md#progress). |
 
 ## Which document to read
 
@@ -15,7 +15,7 @@ Prototype of a **GPU-driven procedural scatter system** (grass, flowers, moss, s
 |---|---|
 | Understand what exists today and how it works | [Docs/ProjectGuide.md](Docs/ProjectGuide.md) |
 | Understand the target architecture and why | [Docs/GrassPrototype_Design.md](Docs/GrassPrototype_Design.md) (section 2 is the vocabulary) |
-| Know what is done and what comes next | [Docs/GrassPrototype_Implementation.md](Docs/GrassPrototype_Implementation.md) |
+| Know what is done and what comes next | [Docs/Implementation/README.md](Docs/Implementation/README.md) (progress), one file per phase |
 | Write code in this project | [Docs/CodingRules.md](Docs/CodingRules.md) |
 | Branch, commit, merge and tag with git | [Docs/GitWorkflow.md](Docs/GitWorkflow.md) |
 | Use the scatter package in another project | [Packages/com.gaiagames.scatter/README.md](Packages/com.gaiagames.scatter/README.md) |
@@ -47,7 +47,8 @@ Packages/com.gaiagames.scatter/   The scatter system (embedded package, no depen
 Assets/Prototype/                 Prototype-only code: fly camera, build script (later: mock terrain, player)
 Assets/Scenes/                    Test scenes (Bootstrap for now)
 Assets/Settings/                  URP assets and the ScatterQuality asset of each quality tier
-Docs/                             Design, implementation plan, project guide, coding rules, git workflow, measurements
+Docs/                             Design, project guide, coding rules, git workflow, measurements
+Docs/Implementation/              Implementation plan: progress and rules, one file per phase
 ```
 
 ## Command line

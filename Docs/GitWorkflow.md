@@ -1,6 +1,6 @@
 # Git workflow - GrassRendering
 
-Work happens on **one branch per phase** of the [implementation plan](GrassPrototype_Implementation.md). A phase reaches `main` through a pull request after its stop and review, and a **tag** marks where it ends. So `main` always holds finished, tested phases.
+Work happens on **one branch per phase** of the [implementation plan](Implementation/README.md). A phase reaches `main` through a pull request after its stop and review, and a **tag** marks where it ends. So `main` always holds finished, tested phases.
 
 | Convention | Value |
 |---|---|

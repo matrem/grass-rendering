@@ -81,5 +81,5 @@ How it is checked:
 
 - Unit tests pass (Edit Mode), including the no-allocation tests.
 - No new compiler warnings.
-- The implementation plan is updated (item ticked, notes), and the design if a decision changed (see "How this document is kept up to date" in `GrassPrototype_Implementation.md`).
+- The implementation plan is updated (item ticked, notes), and the design if a decision changed (see "How the plan is kept up to date" in `Docs/Implementation/README.md`).
 - `Docs/ProjectGuide.md` describes the change (classes, assemblies, folders, settings, debug tools, tests).

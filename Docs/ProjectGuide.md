@@ -3,7 +3,7 @@
 This guide describes **what exists today** in the repository and how it works. It is updated with each change, so it always matches the code.
 
 - The target architecture and the reasons behind it are in the [design document](GrassPrototype_Design.md). Section numbers like "design 12.1" refer to it.
-- The order of work and the progress are in the [implementation plan](GrassPrototype_Implementation.md).
+- The order of work and the progress are in the [implementation plan](Implementation/README.md), with one file per phase.
 - The coding rules are in [CodingRules.md](CodingRules.md).
 
 Current state: **Phase 1 done** (spikes) and **Phase 1b done** (cost investigation); next: Phase 2 (core pipeline). On top of the Phase 0 skeleton (debug tools, quality tiers, bootstrap scene, tests, build script), the BRG draw spike draws millions of blades and small rocks with three draw command types (section 4.3), with the Phase 1b cost levers: density falloff, widening and shadow caster presets (section 4.4). The spike code is replaced in Phase 2.
@@ -55,7 +55,8 @@ Assets/
   Scenes/Spike_Draw.unity              Phase 1 BRG draw spike, second scene of the build
   Settings/                            URP assets (PC_RPAsset, PC_Renderer), volume profiles
   Settings/Scatter/                    ScatterQuality_RTX3060Ti, ScatterQuality_RTX5070Ti
-Docs/                                  Design, implementation plan, this guide, coding rules, git workflow
+Docs/                                  Design, this guide, coding rules, git workflow
+Docs/Implementation/                   Implementation plan: README (progress, rules), one file per phase
 Docs/Measurements/                     Benchmark CSVs and probe reports, one folder per phase, with a README
 Builds/                                Player builds (ignored by git)
 ```
